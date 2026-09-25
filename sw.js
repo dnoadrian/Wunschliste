@@ -4,7 +4,7 @@
  * - die Seite kommt immer zuerst frisch vom Server (neue Versionen sofort da)
  * - Preise (/proxy), Konten (/api) und Diagnose werden NIE zwischengespeichert
  */
-const CACHE = 'wishly-v6';
+const CACHE = 'wishly-v7';
 const SHELL = ['./', 'favicon.svg', 'favicon-32.png', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
@@ -24,7 +24,7 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return;
-  if (/\/(api|proxy|debug)(\/|$)/.test(url.pathname)) return;
+  if (/\/(api|proxy)(\/|$)/.test(url.pathname)) return;
 
   // Seite: zuerst Netz, bei keinem Netz die gespeicherte Version
   if (req.mode === 'navigate') {

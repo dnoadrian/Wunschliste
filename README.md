@@ -26,10 +26,10 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 | Datei | Zweck |
 |---|---|
 | `index.html` | die komplette Seite (Design, Preiserkennung, Listen, Login) |
-| `worker.js` | Cloudflare Worker: liefert die Seite aus, Proxy für Shopseiten (`/proxy`), Konten und Speicher (`/api`), Diagnose (`/debug`) |
+| `worker.js` | Cloudflare Worker: liefert die Seite aus, Proxy für Shopseiten (`/proxy`), Konten und Speicher (`/api`), Admin (`/api/admin`) |
 | `wrangler.jsonc` | Einstellungen für Cloudflare (Name des Workers, Speicher für Konten) |
 | `.assetsignore` | Dateien, die nicht öffentlich ausgeliefert werden |
-| `test.html` | Testseite: prüft viele echte Produktlinks und zeigt, was erkannt wird |
+| `.github/workflows/deploy.yml` | veröffentlicht jeden Push auf `main` in Cloudflare |
 | `favicon.svg`, `*.png`, `manifest.webmanifest` | Icons und App-Einstellungen |
 | `sw.js` | Service Worker: App-Start ohne Netz (Preise und Konten werden nie zwischengespeichert) |
 
@@ -49,12 +49,18 @@ Dafür braucht das Repo ein Secret (Settings → Secrets and variables → Actio
 Veröffentlichung von Hand: Actions → Cloudflare Deploy → Run workflow.
 Der Speicher für die Konten (Durable Object `Account`) und die Route `dnoadrian.at/wishly*` stehen in `wrangler.jsonc`.
 
+## Admin
+
+Ganz unten auf der Seite: **ADMIN** → Name `Adrian` + Passwort.
+Zeigt alle Benutzer (Listen, Produkte, Geräte, erstellt, zuletzt aktiv) und kann einzelne Benutzer samt Listen löschen.
+Nach 5 falschen Passwörtern ist der Admin-Login 15 Minuten gesperrt.
+
+Passwort ändern: in Cloudflare beim Worker unter Settings → Variables and Secrets ein Secret `ADMIN_PASSWORD` anlegen.
+Benutzer erscheinen in der Liste, sobald sie Wishly (wieder) öffnen oder sich anmelden.
+
 ## Fehlersuche
 
-- **Preis falsch oder fehlt:** auf den Preis tippen → zeigt, woher er stammt.
-- **Diagnose eines Shops:** `https://<worker>.workers.dev/debug?url=<produktlink>` zeigt,
-  was der Shop dem Worker zurückliefert (Titel, Meta-Daten, alle Preis-Stellen).
-- **Viele Shops auf einmal testen:** `https://<worker>.workers.dev/test.html`
+- **Preis falsch oder fehlt:** auf den Preis tippen → zeigt, woher er stammt; sonst „PREIS EINGEBEN“.
 
 ## Hinweis
 

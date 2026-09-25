@@ -13,7 +13,13 @@
   },
   // Speicher für Benutzerkonten und Wunschlisten (wird beim Deploy automatisch angelegt)
   "durable_objects": {
-    "bindings": [{ "name": "ACCOUNTS", "class_name": "Account" }]
+    "bindings": [
+      { "name": "ACCOUNTS", "class_name": "Account" },
+      { "name": "REGISTRY", "class_name": "Registry" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Account"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Account"] },
+    { "tag": "v2", "new_sqlite_classes": ["Registry"] }
+  ]
 }

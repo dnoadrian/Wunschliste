@@ -239,7 +239,22 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  footer { text-align: center; margin-top: 44px; font-size: 7px; color: var(--text-dim); }
+  footer { text-align: center; margin-top: 44px; font-size: 7px; color: var(--text-dim); display: flex; justify-content: center; align-items: center; gap: 12px; }
+  footer .btn { color: var(--text-dim); border-color: var(--border); }
+
+  /* ADMIN */
+  .admin { margin-top: 18px; border-color: var(--red); }
+  .admin[hidden] { display: none; }
+  .admin .section-title { color: var(--red); border-bottom-color: var(--red); }
+  .admin .section-title .tools { gap: 6px; }
+  .admin__form .field + .field { margin-top: 8px; }
+  .admin__sum { font-size: 7px; color: var(--text-muted); margin-bottom: 10px; }
+  .users { display: grid; gap: 8px; }
+  .user { border: 2px solid var(--border); background: #161616; padding: 10px; display: flex; gap: 10px; align-items: center; }
+  .user__info { flex: 1; min-width: 0; }
+  .user__name { font-size: 8px; color: #fff; word-break: break-all; }
+  .user__name small { font-size: 6px; color: var(--green); margin-left: 6px; }
+  .user__meta { font-size: 6px; color: var(--text-muted); margin-top: 6px; line-height: 2; }
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
@@ -309,7 +324,32 @@
     </section>
   </div>
 
-  <footer>Wishly v1.2</footer>
+  <footer>WISHLY V1.3 <button type="button" class="btn btn--small" id="admin-open" hidden>ADMIN</button></footer>
+
+  <section class="box admin" id="admin" hidden aria-label="Admin">
+    <div class="section-title">
+      <span>ADMIN</span>
+      <span class="tools">
+        <button type="button" class="btn btn--small" id="admin-reload" hidden>&#8635; AKTUALISIEREN</button>
+        <button type="button" class="btn btn--small btn--red" id="admin-logout" hidden>LOGOUT</button>
+        <button type="button" class="btn btn--small" id="admin-close">SCHLIESSEN</button>
+      </span>
+    </div>
+    <form class="admin__form" id="admin-form" autocomplete="on">
+      <div class="field">
+        <input class="input" id="admin-user" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" placeholder="BENUTZER" aria-label="Admin-Benutzer" required>
+      </div>
+      <div class="field">
+        <input class="input" id="admin-pass" name="password" type="password" autocomplete="current-password" placeholder="PASSWORT" aria-label="Passwort" required>
+        <button type="submit" class="btn btn--green" id="admin-login">ANMELDEN</button>
+      </div>
+    </form>
+    <div id="admin-panel" hidden>
+      <p class="admin__sum" id="admin-sum"></p>
+      <div class="users" id="users"></div>
+    </div>
+    <p class="statusline" id="admin-status" role="status" aria-live="polite" hidden></p>
+  </section>
 </div>
 
   <div class="modal" id="modal" hidden>
@@ -1563,7 +1603,6 @@ window.WLUtil = WLUtil;
     save(load().filter((i) => i.id !== id));
   }
 
-  // inspect: Produkt nur auslesen, ohne es zu speichern (für test.html)
   window.Wishlist = {
     all,
     hasUrl,
@@ -1572,7 +1611,6 @@ window.WLUtil = WLUtil;
     remove,
     setPrice,
     isReliable,
-    inspect: resolve,
     account: {
       detect,
       pull,
@@ -2121,26 +2159,162 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+/* ---- Admin-Panel: alle Benutzer anzeigen und löschen ---- */
+
+const ADMIN_KEY = 'wishly.admin';
+let adminToken = null;
+try {
+  adminToken = sessionStorage.getItem(ADMIN_KEY);
+} catch {}
+
+function adminStatus(text, state = '') {
+  const el = $('#admin-status');
+  el.hidden = !text;
+  el.textContent = text;
+  el.dataset.state = state;
+}
+
+async function adminCall(path, body) {
+  const res = await fetch(`api/admin/${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'Content-Type': 'application/json', ...(adminToken ? { Authorization: `Admin ${adminToken}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && path !== 'login') setAdmin(null);
+  if (!res.ok) throw new Error(data.error || `fehler ${res.status}`);
+  return data;
+}
+
+function setAdmin(token) {
+  adminToken = token;
+  try {
+    token ? sessionStorage.setItem(ADMIN_KEY, token) : sessionStorage.removeItem(ADMIN_KEY);
+  } catch {}
+  $('#admin-form').hidden = !!token;
+  $('#admin-panel').hidden = !token;
+  $('#admin-reload').hidden = !token;
+  $('#admin-logout').hidden = !token;
+  if (!token) $('#users').replaceChildren();
+}
+
+const when = (t) => (t ? new Date(t).toLocaleString('de-AT', { dateStyle: 'short', timeStyle: 'short' }) : '–');
+
+async function loadUsers() {
+  $('#admin-reload').disabled = true;
+  adminStatus('lade benutzer …', 'busy');
+  try {
+    const { users } = await adminCall('users');
+    const me = (A.user() || '').toLowerCase();
+    $('#admin-sum').textContent = `${users.length} BENUTZER · ${users.reduce((n, u) => n + u.items, 0)} PRODUKTE`;
+    $('#users').replaceChildren(
+      ...users.map((u) => {
+        const row = document.createElement('div');
+        row.className = 'user';
+        const info = document.createElement('div');
+        info.className = 'user__info';
+        const name = document.createElement('div');
+        name.className = 'user__name';
+        name.textContent = u.name;
+        if (u.name.toLowerCase() === me) name.insertAdjacentHTML('beforeend', '<small>DU</small>');
+        const meta = document.createElement('div');
+        meta.className = 'user__meta';
+        meta.textContent = `${u.lists} listen · ${u.items} produkte · ${u.devices} geräte\nerstellt ${when(u.created)} · zuletzt ${when(u.seen)}`;
+        meta.style.whiteSpace = 'pre-line';
+        info.append(name, meta);
+        row.append(info);
+        if (u.name.toLowerCase() !== 'adrian') {
+          const del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'btn btn--small btn--red';
+          del.textContent = 'LÖSCHEN';
+          del.addEventListener('click', () => deleteUser(u, del));
+          row.append(del);
+        }
+        return row;
+      }),
+    );
+    adminStatus(users.length ? '' : 'noch keine benutzer');
+  } catch (e) {
+    adminStatus(`fehler: ${e.message}`, 'err');
+  } finally {
+    $('#admin-reload').disabled = false;
+  }
+}
+
+async function deleteUser(u, btn) {
+  const ok = await ask({
+    title: 'benutzer löschen',
+    text: `"${u.name}" mit ${u.lists} listen und ${u.items} produkten endgültig löschen?`,
+    ok: 'löschen',
+    danger: true,
+  });
+  if (!ok) return;
+  btn.disabled = true;
+  try {
+    await adminCall('delete', { user: u.name });
+    adminStatus(`"${u.name}" gelöscht`, 'ok');
+    await loadUsers();
+    adminStatus(`"${u.name}" gelöscht`, 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    adminStatus(`fehler: ${e.message}`, 'err');
+  }
+}
+
+$('#admin-open').addEventListener('click', () => {
+  const box = $('#admin');
+  box.hidden = !box.hidden;
+  if (box.hidden) return;
+  setAdmin(adminToken);
+  adminStatus('');
+  if (adminToken) loadUsers();
+  else setTimeout(() => $('#admin-user').focus(), 50);
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+$('#admin-close').addEventListener('click', () => ($('#admin').hidden = true));
+$('#admin-reload').addEventListener('click', loadUsers);
+$('#admin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#admin-login').disabled = true;
+  adminStatus('melde an …', 'busy');
+  try {
+    const { token } = await adminCall('login', { user: $('#admin-user').value, password: $('#admin-pass').value });
+    $('#admin-pass').value = '';
+    setAdmin(token);
+    await loadUsers();
+  } catch (err) {
+    adminStatus(`fehler: ${err.message}`, 'err');
+  } finally {
+    $('#admin-login').disabled = false;
+  }
+});
+$('#admin-logout').addEventListener('click', async () => {
+  try {
+    await adminCall('logout', {});
+  } catch {}
+  setAdmin(null);
+  adminStatus('abgemeldet', 'ok');
+});
+
 // Service Worker: App startet schnell und auch kurz ohne Netz
-if ('serviceWorker' in navigator && !shareParams.has('embed') && window.isSecureContext) {
+if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// Eingebettet in test.html (?embed): nichts laden, nichts aktualisieren
-if (!new URLSearchParams(location.search).has('embed')) {
-  (async () => {
-    const { online, user } = await A.detect();
-    if (!online) return startApp(); // ohne Worker: alles bleibt im Browser, kein Login
-    if (!user) return showLogin();
-    try {
-      // neuesten Stand vom Worker holen (max. 5 s), sonst Zwischenspeicher nehmen
-      await Promise.race([A.pull(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 5000))]);
-    } catch {
-      /* offline oder langsam: Zwischenspeicher bleibt */
-    }
-    if (A.user()) startApp(); // Sitzung abgelaufen -> Login wird schon angezeigt
-  })();
-}
+(async () => {
+  const { online, user } = await A.detect();
+  $('#admin-open').hidden = !online; // Admin gibt es nur mit Worker
+  if (!online) return startApp(); // ohne Worker: alles bleibt im Browser, kein Login
+  if (!user) return showLogin();
+  try {
+    // neuesten Stand vom Worker holen (max. 5 s), sonst Zwischenspeicher nehmen
+    await Promise.race([A.pull(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 5000))]);
+  } catch {
+    /* offline oder langsam: Zwischenspeicher bleibt */
+  }
+  if (A.user()) startApp(); // Sitzung abgelaufen -> Login wird schon angezeigt
+})();
 
   </script>
 </body>
