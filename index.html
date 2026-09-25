@@ -155,8 +155,9 @@
     text-transform: uppercase;
   }
   .section-icon { color: #aaaaaa; }
-  .section-title .tools { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; letter-spacing: 0; text-shadow: none; }
-  .sort__btn[aria-pressed="true"] { border-color: var(--done-border); color: #ffffff; background: var(--done-bg); }
+  .section-title { flex-wrap: nowrap; }
+  .section-title #list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .section-title .tools { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; letter-spacing: 0; text-shadow: none; }
 
   /* PRODUKTE */
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -244,7 +245,6 @@
 
   <header>
     <h1>&#9670; <span>WUNSCH</span>LISTE &#9670;</h1>
-    <p class="subtitle">Link rein &ndash; Foto, Name und Preis raus</p>
     <p class="userline" id="userline" hidden>USER: <b id="whoami">&ndash;</b> <button type="button" class="btn btn--red btn--small" id="logout">LOGOUT</button></p>
   </header>
 
@@ -294,8 +294,6 @@
       <div class="section-title">
         <span class="section-icon">&#9670;</span> <span id="list-title">MAIN</span>
         <span class="tools">
-          <button type="button" class="btn btn--small sort__btn" data-sort="desc" title="teuerstes zuerst">PREIS &darr;</button>
-          <button type="button" class="btn btn--small sort__btn" data-sort="asc" title="günstigstes zuerst">PREIS &uarr;</button>
           <button type="button" class="btn btn--small" id="refresh">&#8635; AKTUALISIEREN</button>
         </span>
       </div>
@@ -1560,11 +1558,8 @@ const W = window.Wishlist;
 let items = [];
 const busy = new Set();
 let gen = 0;
-// Sortierung pro Gerät merken (Standard: Preis absteigend)
-let sortDir = 'desc';
-try {
-  sortDir = localStorage.getItem('wunschliste.sort') === 'asc' ? 'asc' : 'desc';
-} catch {} // steigt bei jedem Listenwechsel, laufende Abrufe der alten Liste zeichnen dann nicht mehr
+// Sortierung: immer nach Preis absteigend (teuerstes zuerst)
+const sortDir = 'desc'; // steigt bei jedem Listenwechsel, laufende Abrufe der alten Liste zeichnen dann nicht mehr
 
 function renderLists() {
   const box = $('#lists');
@@ -1699,7 +1694,6 @@ function render() {
     if (a.price == null || b.price == null) return (a.price == null) - (b.price == null);
     return (a.price - b.price) * dir;
   });
-  document.querySelectorAll('.sort__btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sort === sortDir)));
   sorted.forEach((item, i) => {
     const el = tpl.content.firstElementChild.cloneNode(true);
     el.classList.toggle('loading', busy.has(item.id));
@@ -1861,15 +1855,6 @@ $('#add').addEventListener('submit', (e) => {
   if (url) addItem(url);
 });
 $('#refresh').addEventListener('click', refreshAll);
-document.querySelectorAll('.sort__btn').forEach((b) =>
-  b.addEventListener('click', () => {
-    sortDir = b.dataset.sort;
-    try {
-      localStorage.setItem('wunschliste.sort', sortDir);
-    } catch {}
-    render();
-  }),
-);
 $('#new-list').addEventListener('click', newList);
 $('#rename-list').addEventListener('click', renameList);
 $('#delete-list').addEventListener('click', deleteList);
