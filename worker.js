@@ -22,12 +22,22 @@ const HEADERS = {
 // Andere Seiten, die den Proxy zusätzlich benutzen dürfen (z.B. GitHub Pages)
 const ERLAUBT = ['https://dnoadrian.github.io'];
 
+// Wishly kann auch unter einem Unterordner laufen, z.B. https://dnoadrian.at/wishly/
+const BASE = '/wishly';
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === BASE || url.pathname.startsWith(`${BASE}/`)) {
+      // /wishly -> /wishly/ (sonst stimmen die relativen Pfade der Seite nicht)
+      if (url.pathname === BASE) return Response.redirect(`${url.origin}${BASE}/${url.search}`, 301);
+      url.pathname = url.pathname.slice(BASE.length);
+    } else if (url.pathname.startsWith(BASE)) {
+      return fetch(request); // z.B. /wishlyxyz gehört nicht zu Wishly -> an die eigentliche Webseite
+    }
     if (url.pathname === '/debug') return debug(url.searchParams.get('url'));
     if (url.pathname.startsWith('/api/')) return api(request, env, url);
-    if (url.pathname !== '/proxy') return env.ASSETS.fetch(request);
+    if (url.pathname !== '/proxy') return env.ASSETS.fetch(new Request(url, request));
 
     const origin = request.headers.get('Origin');
     const sameSite = request.headers.get('Sec-Fetch-Site') === 'same-origin' || origin === url.origin;

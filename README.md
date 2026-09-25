@@ -33,6 +33,12 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 | `favicon.svg`, `*.png`, `manifest.webmanifest` | Icons und App-Einstellungen |
 | `sw.js` | Service Worker: App-Start ohne Netz (Preise und Konten werden nie zwischengespeichert) |
 
+## Adressen
+
+- `https://<worker>.workers.dev/` (Standard)
+- `https://dnoadrian.at/wishly/` – über eine Worker-Route `dnoadrian.at/wishly*` (Domain muss in Cloudflare sein).
+  Die Seite verwendet nur relative Pfade und funktioniert deshalb unter beiden Adressen.
+
 ## Veröffentlichen (Cloudflare)
 
 Der Worker ist mit diesem Repo verbunden: jeder Push auf `main` wird automatisch gebaut und veröffentlicht.

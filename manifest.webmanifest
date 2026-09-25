@@ -1,10 +1,10 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "Wishly",
   "short_name": "Wishly",
   "description": "Wishly – Gaming-Wunschliste: Link rein, Foto, Name und Preis raus.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#111111",
@@ -41,7 +41,7 @@
     }
   ],
   "share_target": {
-    "action": "/",
+    "action": "./",
     "method": "GET",
     "enctype": "application/x-www-form-urlencoded",
     "params": {
@@ -54,7 +54,7 @@
     {
       "name": "Produkt hinzufügen",
       "short_name": "Hinzufügen",
-      "url": "/?add",
+      "url": "./?add",
       "icons": [
         {
           "src": "icon-192.png",

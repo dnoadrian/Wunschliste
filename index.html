@@ -546,7 +546,7 @@ window.WLUtil = WLUtil;
   const authHeader = () => ({ Authorization: `Bearer ${encodeURIComponent(session.user)}:${session.token}` });
 
   async function call(path, { method = 'GET', body, auth = false } = {}) {
-    const res = await fetch(`/api/${path}`, {
+    const res = await fetch(`api/${path}`, {
       method,
       headers: { 'Content-Type': 'application/json', ...(auth ? authHeader() : {}) },
       body: body ? JSON.stringify(body) : undefined,
@@ -564,24 +564,49 @@ window.WLUtil = WLUtil;
   }
 
   // Änderung merken und kurz danach zum Worker schicken
+  // Merker: gibt es Änderungen, die noch nicht beim Worker sind? (überlebt Neuladen/Schließen)
+  const dirtyKey = () => `wunschliste.u.${session.user.toLowerCase()}.dirty`;
+  const isDirty = () => !!session && !!read(dirtyKey(), null);
+
   function changed() {
     if (!online || !session) return;
+    write(dirtyKey(), Date.now());
     clearTimeout(pushTimer);
     pushTimer = setTimeout(push, 700);
   }
   async function push() {
     clearTimeout(pushTimer);
+    pushTimer = null;
     if (!online || !session) return;
+    const mark = read(dirtyKey(), null);
     try {
       await call('data', { method: 'PUT', body: { data: snapshot() }, auth: true });
+      // nur löschen, wenn inzwischen nichts Neues dazugekommen ist
+      if (read(dirtyKey(), null) === mark) localStorage.removeItem(dirtyKey());
     } catch {
-      /* nächster Versuch bei der nächsten Änderung */
+      /* Merker bleibt -> nächster Versuch beim nächsten Öffnen oder der nächsten Änderung */
     }
   }
+  // Seite wird geschlossen/verlassen: ausstehende Änderung sofort schicken
+  function flush() {
+    if (!online || !session || !pushTimer) return;
+    clearTimeout(pushTimer);
+    pushTimer = null;
+    try {
+      fetch('api/data', {
+        method: 'PUT',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ data: snapshot() }),
+      }).catch(() => {});
+    } catch {}
+  }
+  addEventListener('pagehide', flush);
+  document.addEventListener('visibilitychange', () => document.hidden && flush());
 
   async function detect() {
     try {
-      const res = await fetch('/api/ping', { signal: AbortSignal.timeout(5000) });
+      const res = await fetch('api/ping', { signal: AbortSignal.timeout(5000) });
       online = res.ok && (await res.json()).ok === true;
     } catch {
       // kein Netz (z.B. App offline gestartet): mit Sitzung trotzdem die eigenen Listen aus dem Zwischenspeicher zeigen
@@ -594,6 +619,11 @@ window.WLUtil = WLUtil;
   // neueste Listen vom Worker holen (Worker ist die Wahrheit)
   async function pull() {
     if (!online || !session) return false;
+    // eigene, noch nicht hochgeladene Änderungen gewinnen: erst schicken statt überschreiben
+    if (isDirty()) {
+      await push();
+      if (isDirty()) return false;
+    }
     const { data } = await call('data', { auth: true });
     if (data) applySnapshot(data);
     return true;
@@ -686,7 +716,7 @@ window.WLUtil = WLUtil;
   function proxies() {
     if (EIGENER_PROXY) return [(u) => `${EIGENER_PROXY.replace(/\/+$/, '')}/proxy?url=${encodeURIComponent(u)}`];
     // Läuft die Seite auf dem Cloudflare Worker, gibt es den Proxy unter /proxy auf derselben Adresse
-    if (/\.workers\.dev$/.test(location.hostname)) return [(u) => `/proxy?url=${encodeURIComponent(u)}`];
+    if (/\.workers\.dev$|(^|\.)dnoadrian\.at$/.test(location.hostname)) return [(u) => `proxy?url=${encodeURIComponent(u)}`];
     return PROXIES;
   }
 
