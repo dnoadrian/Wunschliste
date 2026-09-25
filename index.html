@@ -623,7 +623,7 @@ window.WLUtil = WLUtil;
       }),
       fromEmbeddedJson(doc, u),
       fromDom(doc),
-      fromJsonRegex(html, u),
+      fromJsonRegex(`${html}\n${nextFlight(doc).text}`, u),
       fromText(doc),
     ];
     // Liefert eine genaue Quelle schon einen Euro-Preis (z.B. Shop-Preis für Österreich),
@@ -693,8 +693,33 @@ window.WLUtil = WLUtil;
   }
 
   // Shops, die ihre Daten als JSON in die Seite schreiben (Next.js, Nuxt, Vue, eigene SPAs …)
+  // Next.js (App Router) schreibt die Seitendaten als Datenstrom: self.__next_f.push([1,"…"])
+  function nextFlight(doc) {
+    let text = '';
+    const objects = [];
+    doc.querySelectorAll('script').forEach((s) => {
+      const t = s.textContent;
+      if (!t.includes('__next_f')) return;
+      for (const m of t.matchAll(/self\.__next_f\.push\(\[\s*\d+\s*,\s*("(?:[^"\\]|\\.)*")\s*\]\)/g)) {
+        try {
+          text += JSON.parse(m[1]);
+        } catch {}
+      }
+    });
+    if (!text) return { text, objects };
+    // Zeilen wie  3:{"product":{…}}  oder  1a:["$","div",null,{…}]
+    for (const line of text.split('\n')) {
+      const m = line.match(/^[0-9a-z]+:(?:[A-Z])?([[{][\s\S]*)$/);
+      if (!m) continue;
+      try {
+        objects.push(JSON.parse(m[1]));
+      } catch {}
+    }
+    return { text, objects };
+  }
+
   function fromEmbeddedJson(doc, u) {
-    const blobs = [];
+    const blobs = [...nextFlight(doc).objects];
     doc.querySelectorAll('script').forEach((s) => {
       const t = s.textContent.trim();
       if (!t || t.length > 3e6) return;
@@ -713,11 +738,13 @@ window.WLUtil = WLUtil;
     let best = null;
     let named = null;
     for (const b of blobs) {
-      let data;
-      try {
-        data = JSON.parse(b);
-      } catch {
-        continue;
+      let data = b;
+      if (typeof b === 'string') {
+        try {
+          data = JSON.parse(b);
+        } catch {
+          continue;
+        }
       }
       walkJson(data, (o) => {
         const title = typeof o.name === 'string' ? o.name : typeof o.title === 'string' ? o.title : null;

@@ -82,6 +82,18 @@ async function debug(target) {
       '--- itemprop',
       ...grab(/<[^>]+itemprop=["'][^"']+["'][^>]*>/gi).slice(0, 15),
       '',
+      '--- preis-stellen (code)',
+      ...[...html.matchAll(/\\?"(?:price|amount|salePrice|finalPrice)\\?"\s*:\s*\\?"?[\d.,]+/gi)]
+        .slice(0, 20)
+        .map((m) => html.slice(Math.max(0, m.index - 120), m.index + 60).replace(/\s+/g, ' ')),
+      '',
+      '--- preis-stellen (text)',
+      ...[...html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').matchAll(/.{0,60}(?:€|EUR|\$)\s?\d[\d.,]*|.{0,60}\d[\d.,]*\s?(?:€|EUR)/g)]
+        .slice(0, 20)
+        .map((m) => m[0].trim()),
+      '',
+      `next.js datenstrom: ${(html.match(/self\.__next_f\.push/g) || []).length} teile`,
+      '',
       '--- scripts',
       ...grab(/<script[^>]*src=["'][^"']+["'][^>]*>/gi).slice(0, 15),
       ...grab(/<script[^>]*type=["'][^"']*json[^"']*["'][^>]*>/gi).slice(0, 10),
