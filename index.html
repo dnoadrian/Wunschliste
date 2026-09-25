@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gaming Wunschliste</title>
+  <title>Wunschliste</title>
   <meta name="description" content="Wunschliste: Produktlink einfügen, Foto, Name und aktuellen Preis sehen.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,6 +12,11 @@
   <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="theme-color" content="#111111">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Wunschliste">
   <style>
   /* Stil wie der Enchantment Tracker: Pixel-Schrift, dunkle Kästen, 2px-Rahmen, weißes Leuchten */
   :root {
@@ -244,7 +249,7 @@
 <div class="page">
 
   <header>
-    <h1>&#9670; <span>WUNSCH</span>LISTE &#9670;</h1>
+    <h1><span>WUNSCH</span>LISTE</h1>
     <p class="userline" id="userline" hidden>USER: <b id="whoami">&ndash;</b> <button type="button" class="btn btn--red btn--small" id="logout">LOGOUT</button></p>
   </header>
 
@@ -284,7 +289,7 @@
     <form class="box" id="add" autocomplete="off">
       <div class="box__head"><label for="url" class="label">PRODUKT HINZUF&Uuml;GEN</label></div>
       <div class="field">
-        <input class="input" id="url" type="url" required spellcheck="false" placeholder="https://… LINK EINF&Uuml;GEN">
+        <input class="input" id="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" placeholder="https://… LINK EINF&Uuml;GEN" aria-label="Produktlink">
         <button type="submit" class="btn btn--green" id="add-btn">+ HINZUF&Uuml;GEN</button>
       </div>
       <p class="statusline" id="statusline" role="status" aria-live="polite">lade …</p>
@@ -320,7 +325,7 @@
 
   <template id="card">
     <article class="card">
-      <div class="card__img"><img alt="" loading="lazy"><span class="card__idx"></span></div>
+      <div class="card__img"><img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span class="card__idx"></span></div>
       <div class="card__body">
         <h2 class="card__title"></h2>
         <div class="card__price"><span class="card__best"></span></div>
@@ -688,7 +693,8 @@ window.WLUtil = WLUtil;
     const list = proxies();
     const ctrls = list.map(() => new AbortController());
     const attempt = async (p, i) => {
-      const timer = setTimeout(() => ctrls[i].abort(), 10000);
+      // eigener Worker (1 Proxy) darf etwas länger brauchen als die öffentlichen
+      const timer = setTimeout(() => ctrls[i].abort(), list.length === 1 ? 16000 : 10000);
       try {
         const res = await fetch(p(url), { signal: ctrls[i].signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1460,7 +1466,7 @@ window.WLUtil = WLUtil;
     };
   }
 
-  const all = () => load();
+  const all = (lid = activeId) => load(lid);
 
   async function add(url) {
     if (!/^https?:\/\//i.test(url || '')) throw new Error('gültiger link (http/https) benötigt');
@@ -1473,8 +1479,7 @@ window.WLUtil = WLUtil;
     return item;
   }
 
-  async function refresh(id) {
-    const lid = activeId;
+  async function refresh(id, lid = activeId) {
     const item = load(lid).find((i) => i.id === id);
     if (!item) throw new Error('nicht gefunden');
     let patch;
@@ -1501,6 +1506,10 @@ window.WLUtil = WLUtil;
     return cur;
   }
 
+  // gleiches Produkt schon in der Liste?
+  const hasUrl = (url, lid = activeId) =>
+    load(lid).some((i) => [i.sourceUrl, i.url].some((u) => u && u.replace(/[#?].*$/, '') === url.replace(/[#?].*$/, '') && (u.split('?')[1] || '') === (url.split('?')[1] || '')));
+
   // eur = Zahl: Preis selbst festlegen · eur = null: wieder den erkannten Shop-Preis nehmen
   function setPrice(id, eur) {
     const items = load();
@@ -1524,6 +1533,7 @@ window.WLUtil = WLUtil;
   // inspect: Produkt nur auslesen, ohne es zu speichern (für test.html)
   window.Wishlist = {
     all,
+    hasUrl,
     add,
     refresh,
     remove,
@@ -1555,11 +1565,11 @@ const eur = (n) => (n == null ? '—' : new Intl.NumberFormat('de-AT', { style: 
 const pad = (n) => String(n).padStart(2, '0');
 const W = window.Wishlist;
 
-let items = [];
-const busy = new Set();
-let gen = 0;
-// Sortierung: immer nach Preis absteigend (teuerstes zuerst)
-const sortDir = 'desc'; // steigt bei jedem Listenwechsel, laufende Abrufe der alten Liste zeichnen dann nicht mehr
+let items = []; // Produkte der offenen Liste
+const busy = new Set(); // Produkte, deren Preis gerade geladen wird
+let run = 0; // steigt bei An-/Abmelden: laufende Aktualisierungen der alten Sitzung zeichnen dann nicht mehr
+let refreshing = null; // laufende Aktualisierung (nur eine gleichzeitig)
+const cards = new Map(); // fertige Karten je Produkt, damit Bilder beim Neuzeichnen nicht flackern
 
 function renderLists() {
   const box = $('#lists');
@@ -1582,16 +1592,13 @@ function renderLists() {
   $('#delete-list').hidden = W.lists().length <= 1;
 }
 
+// Liste wechseln: nur anzeigen, NICHT neu laden (Preise werden beim Öffnen der Seite aktualisiert)
 function openList(id) {
   W.switchTo(id);
-  gen++;
-  busy.clear();
   items = W.all();
-  $('#refresh').disabled = false;
   renderLists();
   render();
-  if (items.length) refreshAll();
-  else status(`liste "${W.active().name}" ist leer. füg oben einen produktlink ein.`);
+  if (!refreshing) status(items.length ? '' : `liste "${W.active().name}" ist leer. füg oben einen produktlink ein.`);
 }
 
 /* ---- eigenes Fenster (ersetzt prompt/confirm des Browsers) ---- */
@@ -1683,72 +1690,88 @@ function status(text, state = '') {
   el.dataset.state = state;
 }
 
-function render() {
-  const grid = $('#grid');
-  const tpl = $('#card');
-  grid.replaceChildren();
+// Felder, die auf der Karte sichtbar sind
+const VISIBLE = ['title', 'image', 'price', 'priceSource', 'currency', 'originalPrice', 'rateApprox', 'manualPrice', 'error', 'shop', 'url', 'sourceUrl'];
+const safeUrl = (u) => (/^https?:\/\//i.test(u || '') ? u : null);
 
-  // nach Preis sortieren (Standard: teuerstes zuerst), ohne Preis immer ans Ende
-  const dir = sortDir === 'asc' ? 1 : -1;
+function buildCard(item) {
+  const el = $('#card').content.firstElementChild.cloneNode(true);
+  const img = $('img', el);
+  if (item.image) {
+    img.src = item.image;
+    img.alt = item.title;
+    img.onerror = () => {
+      img.parentElement.classList.add('noimg');
+      img.remove();
+    };
+  } else {
+    $('.card__img', el).classList.add('noimg');
+    img.remove();
+  }
+  $('.card__title', el).textContent = item.title;
+  const best = $('.card__best', el);
+  best.textContent = eur(item.price);
+  if (item.priceSource) {
+    best.title = `preis aus: ${item.priceSource}`;
+    best.onclick = () =>
+      status(`${item.title}: preis aus ${item.priceSource}${item.currency && item.currency !== 'EUR' ? `, umgerechnet aus ${item.currency}` : ''}`);
+  }
+  const shopEl = $('.card__shop', el);
+  shopEl.textContent = item.shop || '';
+  if (item.currency && item.currency !== 'EUR' && item.originalPrice != null) {
+    // Originalpreis in Fremdwährung anzeigen
+    const orig = new Intl.NumberFormat('de-AT', { style: 'currency', currency: item.currency }).format(item.originalPrice);
+    shopEl.textContent += ` · original ${orig}${item.rateApprox ? ' (kurs ca.)' : ''}`;
+  }
+  if (item.manualPrice == null && item.price != null && !W.isReliable(item.priceSource)) shopEl.textContent += ' · preis unsicher';
+  if (item.manualPrice != null) shopEl.textContent += ' · preis selbst eingetragen';
+
+  const err = $('.card__meta', el);
+  if (item.error) err.textContent = item.error;
+  else err.remove();
+
+  // Bearbeiten nur, wenn der Preis nicht (sicher) herausgefunden wurde
+  const setBtn = $('.card__set', el);
+  if (item.price == null || item.manualPrice != null || !W.isReliable(item.priceSource)) {
+    setBtn.onclick = () => enterPrice(item);
+    if (item.manualPrice != null) setBtn.textContent = 'PREIS ÄNDERN';
+    else if (item.price != null) setBtn.textContent = 'PREIS BEARBEITEN';
+  } else setBtn.remove();
+
+  const link = $('.card__src', el);
+  const href = safeUrl(item.url) || safeUrl(item.sourceUrl);
+  if (href) link.href = href;
+  else link.remove();
+  $('.card__rm', el).onclick = () => removeItem(item);
+  return el;
+}
+
+function render() {
+  // nach Preis sortieren: teuerstes zuerst, ohne Preis ans Ende
   const sorted = [...items].sort((a, b) => {
     if (a.price == null || b.price == null) return (a.price == null) - (b.price == null);
-    return (a.price - b.price) * dir;
+    return b.price - a.price;
   });
-  sorted.forEach((item, i) => {
-    const el = tpl.content.firstElementChild.cloneNode(true);
-    el.classList.toggle('loading', busy.has(item.id));
-
-    const img = $('img', el);
-    if (item.image) {
-      img.src = item.image;
-      img.alt = item.title;
-      img.onerror = () => {
-        img.parentElement.classList.add('noimg');
-        img.remove();
-      };
-    } else {
-      $('.card__img', el).classList.add('noimg');
-      img.remove();
+  const els = sorted.map((item, i) => {
+    // Karte nur neu bauen, wenn sich etwas Sichtbares geändert hat (Bilder laden sonst neu und flackern)
+    const sig = JSON.stringify(VISIBLE.map((k) => item[k]));
+    let c = cards.get(item.id);
+    if (!c || c.sig !== sig) {
+      const el = buildCard(item);
+      // gleiches Bild: vorhandenes (schon geladenes) Bild-Element übernehmen
+      const oldImg = c && $('.card__img img', c.el);
+      const newImg = $('.card__img img', el);
+      if (oldImg && newImg && oldImg.getAttribute('src') === newImg.getAttribute('src')) newImg.replaceWith(oldImg);
+      c = { sig, el };
+      cards.set(item.id, c);
     }
-    $('.card__idx', el).textContent = pad(i + 1);
-    $('.card__title', el).textContent = item.title;
-    const best = $('.card__best', el);
-    best.textContent = eur(item.price);
-    if (item.priceSource) {
-      best.title = `preis aus: ${item.priceSource}`;
-      best.onclick = () =>
-        status(`${item.title}: preis aus ${item.priceSource}${item.currency && item.currency !== 'EUR' ? `, umgerechnet aus ${item.currency}` : ''}`);
-    }
-    const shopEl = $('.card__shop', el);
-    shopEl.textContent = item.shop || '';
-    if (item.currency && item.currency !== 'EUR' && item.originalPrice != null) {
-      // Originalpreis in Fremdwährung anzeigen
-      const orig = new Intl.NumberFormat('de-AT', { style: 'currency', currency: item.currency }).format(item.originalPrice);
-      shopEl.textContent += ` · original ${orig}${item.rateApprox ? ' (kurs ca.)' : ''}`;
-    }
-    if (item.manualPrice == null && item.price != null && !W.isReliable(item.priceSource)) {
-      shopEl.textContent += ' · preis unsicher';
-    }
-    if (item.manualPrice != null) {
-      shopEl.textContent += ' · preis selbst eingetragen';
-    }
-
-    const err = $('.card__meta', el);
-    if (item.error) err.textContent = item.error;
-    else err.remove();
-
-    // Bearbeiten nur, wenn der Preis nicht (sicher) herausgefunden wurde
-    const setBtn = $('.card__set', el);
-    if (item.price == null || item.manualPrice != null || !W.isReliable(item.priceSource)) {
-      setBtn.onclick = () => enterPrice(item);
-      if (item.manualPrice != null) setBtn.textContent = 'PREIS ÄNDERN';
-      else if (item.price != null) setBtn.textContent = 'PREIS BEARBEITEN';
-    } else setBtn.remove();
-
-    $('.card__src', el).href = item.url;
-    $('.card__rm', el).onclick = () => removeItem(item);
-    grid.append(el);
+    c.el.classList.toggle('loading', busy.has(item.id));
+    $('.card__idx', c.el).textContent = pad(i + 1);
+    return c.el;
   });
+  const ids = new Set(items.map((i) => i.id));
+  for (const id of cards.keys()) if (!ids.has(id)) cards.delete(id);
+  $('#grid').replaceChildren(...els);
 
   $('#empty').hidden = items.length > 0;
   const tab = $('.lists__tab[aria-current="true"] small');
@@ -1758,21 +1781,28 @@ function render() {
   $('#sum').textContent = eur(priced.length ? priced.reduce((s, i) => s + i.price, 0) : null);
 }
 
+let adding = false;
 async function addItem(url) {
+  if (adding) return;
+  if (W.hasUrl(url)) return status('dieses produkt ist schon in der liste', 'err');
+  adding = true;
   const btn = $('#add-btn');
   btn.disabled = true;
   status('lade produkt …', 'busy');
   try {
-    const myGen = gen;
+    const lid = W.active().id;
     const listName = W.active().name;
+    const myRun = run;
     const item = await W.add(url);
-    if (myGen !== gen) {
+    if (myRun !== run) return;
+    if (W.active().id !== lid) {
       // inzwischen andere Liste offen: Produkt liegt trotzdem in der ursprünglichen Liste
       renderLists();
       status(`hinzugefügt zu "${listName}": ${item.title}`, 'ok');
       return;
     }
     items.push(item);
+    renderLists();
     render();
     const conv = item.currency && item.currency !== 'EUR' ? ` (umgerechnet aus ${item.currency})` : '';
     status(`hinzugefügt: ${item.title} → ${eur(item.price)}${conv}`, item.price == null ? 'err' : 'ok');
@@ -1780,41 +1810,55 @@ async function addItem(url) {
   } catch (e) {
     status(`fehler: ${e.message}`, 'err');
   } finally {
+    adding = false;
     btn.disabled = false;
   }
 }
 
-async function refreshAll() {
-  if (!items.length) return;
+// Preise neu laden. allLists = true: alle Listen (beim Öffnen der Seite), sonst nur die offene Liste (Knopf)
+function refreshAll(allLists = false) {
+  if (refreshing) return refreshing;
+  const myRun = run;
+  const ids = allLists ? W.lists().map((l) => l.id) : [W.active().id];
+  const queue = ids.flatMap((lid) => W.all(lid).map((item) => ({ lid, id: item.id })));
+  if (!queue.length) return Promise.resolve();
   const btn = $('#refresh');
   btn.disabled = true;
+  const total = queue.length;
   let done = 0;
-  const myGen = gen;
-  status(`aktualisiere preise … 0/${items.length}`, 'busy');
-  const queue = [...items];
+  status(`aktualisiere preise … 0/${total}`, 'busy');
+  queue.forEach((q) => busy.add(q.id));
+  render();
+
   const worker = async () => {
-    while (queue.length && myGen === gen) {
-      const item = queue.shift();
-      busy.add(item.id);
-      render();
+    while (queue.length && myRun === run) {
+      const { lid, id } = queue.shift();
+      let fresh = null;
       try {
-        const fresh = await W.refresh(item.id);
-        if (myGen !== gen) return;
-        const idx = items.findIndex((x) => x.id === item.id);
-        if (idx >= 0) items[idx] = fresh;
+        fresh = await W.refresh(id, lid);
       } catch {
-        /* fehler steht am item */
+        /* Fehler steht am Produkt */
       }
-      if (myGen !== gen) return;
-      busy.delete(item.id);
-      render();
-      status(`aktualisiere preise … ${++done}/${items.length}`, 'busy');
+      if (myRun !== run) return;
+      busy.delete(id);
+      // nur zeichnen, wenn das Produkt in der gerade offenen Liste ist
+      if (lid === W.active().id) {
+        const idx = items.findIndex((x) => x.id === id);
+        if (idx >= 0 && fresh) items[idx] = fresh;
+        render();
+      }
+      status(`aktualisiere preise … ${++done}/${total}`, 'busy');
     }
   };
-  await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
-  if (myGen !== gen) return; // andere Liste geöffnet
-  status(`preise aktuell · ${new Date().toLocaleTimeString('de-AT', { timeStyle: 'short' })}`, 'ok');
-  btn.disabled = false;
+  refreshing = Promise.all(Array.from({ length: Math.min(4, total) }, worker)).then(() => {
+    refreshing = null;
+    if (myRun !== run) return;
+    btn.disabled = false;
+    items = W.all();
+    render();
+    status(`preise aktuell · ${new Date().toLocaleTimeString('de-AT', { timeStyle: 'short' })}`, 'ok');
+  });
+  return refreshing;
 }
 
 async function enterPrice(item) {
@@ -1851,10 +1895,16 @@ async function removeItem(item) {
 
 $('#add').addEventListener('submit', (e) => {
   e.preventDefault();
-  const url = $('#url').value.trim();
-  if (url) addItem(url);
+  const raw = $('#url').value.trim();
+  if (!raw) return $('#url').focus();
+  // geteilter Text wie "Schau mal: https://shop…/produkt" -> nur den Link nehmen
+  const m = raw.match(/https?:\/\/[^\s<>"']+/i) || raw.match(/^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+\/\S*/i);
+  if (!m) return status('kein gültiger link gefunden', 'err');
+  const url = /^https?:/i.test(m[0]) ? m[0].replace(/[),.;!]+$/, '') : `https://${m[0]}`;
+  $('#url').value = url;
+  addItem(url);
 });
-$('#refresh').addEventListener('click', refreshAll);
+$('#refresh').addEventListener('click', () => refreshAll(false));
 $('#new-list').addEventListener('click', newList);
 $('#rename-list').addEventListener('click', renameList);
 $('#delete-list').addEventListener('click', deleteList);
@@ -1886,13 +1936,16 @@ function startApp() {
   const user = A.user();
   $('#userline').hidden = !user;
   $('#whoami').textContent = user ? user.toUpperCase() : '–';
-  gen++;
+  run++;
+  refreshing = null;
   busy.clear();
+  cards.clear();
+  $('#refresh').disabled = false;
   items = W.all();
   renderLists();
   render();
-  // Beim Öffnen der Seite: aktuellen Preis aller Produkte neu laden
-  if (items.length) refreshAll();
+  // Nur beim Öffnen der Seite (bzw. Anmelden): Preise ALLER Listen neu laden
+  if (W.lists().some((l) => l.count)) refreshAll(true);
   else status('bereit. füg oben einen produktlink ein.');
 }
 
@@ -1918,12 +1971,14 @@ $('#login-form').addEventListener('submit', (e) => {
 });
 $('#logout').addEventListener('click', async () => {
   if (!(await ask({ title: 'logout', text: 'wirklich abmelden?', ok: 'abmelden', danger: true }))) return;
-  gen++;
+  run++;
+  refreshing = null;
   await A.signOut();
   showLogin('abgemeldet');
 });
 A.onSessionLost(() => {
-  gen++;
+  run++;
+  refreshing = null;
   showLogin('sitzung abgelaufen – bitte neu anmelden');
 });
 

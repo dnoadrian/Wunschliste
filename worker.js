@@ -46,7 +46,7 @@ export default {
 
     let res;
     try {
-      res = await fetch(target, { redirect: 'follow', headers: HEADERS });
+      res = await fetch(target, { redirect: 'follow', headers: HEADERS, signal: AbortSignal.timeout(15000) });
     } catch (e) {
       return new Response(`shop nicht erreichbar: ${e.message}`, { status: 502, headers: cors });
     }
@@ -63,7 +63,7 @@ async function debug(target) {
   if (!target || !/^https?:\/\//i.test(target)) return new Response('?url=https://… fehlt', { status: 400 });
   const out = [`url: ${target}`];
   try {
-    const res = await fetch(target, { redirect: 'follow', headers: HEADERS });
+    const res = await fetch(target, { redirect: 'follow', headers: HEADERS, signal: AbortSignal.timeout(15000) });
     const html = await res.text();
     const grab = (re) => [...html.matchAll(re)].map((m) => m[0].replace(/\s+/g, ' ').slice(0, 300));
     out.push(
