@@ -533,7 +533,12 @@ window.WLUtil = WLUtil;
     ];
     // Liefert eine genaue Quelle schon einen Euro-Preis (z.B. Shop-Preis für Österreich),
     // hat der Vorrang vor Umrechnen: Shops runden und rechnen mit eigenem Kurs
-    const eurSource = sources.slice(0, 5).find((x) => x.price != null && x.currency === 'EUR');
+    // Nur wenn die genaueste Quelle eine bekannte Fremdwährung hat (sonst ginge z.B. der Variantenpreis verloren)
+    const first = sources.find((x) => x.price != null);
+    const eurSource =
+      first && first.currency && first.currency !== 'EUR'
+        ? sources.slice(0, 5).find((x) => x.price != null && x.currency === 'EUR')
+        : null;
     if (eurSource) {
       p.price = eurSource.price;
       p.currency = 'EUR';
