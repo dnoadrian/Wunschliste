@@ -505,20 +505,27 @@ window.WLUtil = WLUtil;
     const doc = parse(html);
     let p = {};
 
-    if (isProductPath && /shopify/i.test(html)) p = strip((await shopify) || {});
-    if (/amazon\./i.test(u.hostname)) p = { ...strip(extractAmazon(doc)), ...p };
-    p = { ...fromJsonLd(doc, u), ...p };
-    p = {
-      ...strip({
-        title: meta(doc, 'og:title') || text(doc.querySelector('title')),
+    // Reihenfolge: genaueste Quelle zuerst, spätere füllen nur Lücken
+    const sources = [
+      strip((await shopify) || {}), // Shopify-kompatible Shops (auch ohne "shopify" im HTML)
+      /amazon\./i.test(u.hostname) ? strip(extractAmazon(doc)) : {},
+      fromJsonLd(doc, u),
+      fromMicrodata(doc),
+      strip({
+        title: meta(doc, 'og:title') || meta(doc, 'twitter:title'),
         brand: meta(doc, 'product:brand'),
         color: meta(doc, 'product:color'),
-        image: meta(doc, 'og:image'),
-        price: parsePrice(meta(doc, 'product:price:amount') || meta(doc, 'og:price:amount')),
+        image: meta(doc, 'og:image') || meta(doc, 'og:image:secure_url') || meta(doc, 'twitter:image'),
+        price: parsePrice(
+          meta(doc, 'product:price:amount') || meta(doc, 'og:price:amount') || meta(doc, 'twitter:data1'),
+        ),
       }),
-      ...p,
-    };
+      fromEmbeddedJson(doc, u),
+      fromDom(doc),
+    ];
+    for (const src of sources) p = { ...src, ...p };
 
+    if (!p.title) p.title = text(doc.querySelector('title')) || titleFromUrl(u);
     if (!p.color) p.color = colorFromUrl(url) || detectColor(p.title);
     if (!p.title) throw new Error('kein produkt auf der seite gefunden');
 
@@ -533,6 +540,159 @@ window.WLUtil = WLUtil;
       shop: u.hostname.replace(/^www\./, ''),
       url,
     };
+  }
+
+  /* ---- Fallbacks für Shops ohne JSON-LD / OpenGraph ---- */
+
+  // schema.org Microdata: itemprop="name" / "price" / "image"
+  function fromMicrodata(doc) {
+    const scope = doc.querySelector('[itemtype*="schema.org/Product"]') || doc;
+    const prop = (name) => {
+      const el = scope.querySelector(`[itemprop="${name}"]`);
+      if (!el) return null;
+      return el.getAttribute('content') || el.getAttribute('src') || el.getAttribute('href') || text(el);
+    };
+    if (!doc.querySelector('[itemprop]')) return {};
+    return strip({
+      title: prop('name'),
+      brand: prop('brand'),
+      color: prop('color'),
+      image: prop('image'),
+      price: parsePrice(prop('price') || prop('lowPrice')),
+    });
+  }
+
+  // Shops, die ihre Daten als JSON in die Seite schreiben (Next.js, Nuxt, Vue, eigene SPAs …)
+  function fromEmbeddedJson(doc, u) {
+    const blobs = [];
+    doc.querySelectorAll('script').forEach((s) => {
+      const t = s.textContent.trim();
+      if (!t || t.length > 3e6) return;
+      const type = (s.getAttribute('type') || '').toLowerCase();
+      if (type.includes('json') && !type.includes('ld+json')) blobs.push(t);
+      else {
+        // window.__STATE__ = {...};  /  var product = {...};
+        const m = t.match(/=\s*(\{[\s\S]*\})\s*;?\s*$/);
+        if (m) blobs.push(m[1]);
+      }
+    });
+
+    const slug = normalizeSlug(u);
+    let best = null;
+    for (const b of blobs) {
+      let data;
+      try {
+        data = JSON.parse(b);
+      } catch {
+        continue;
+      }
+      walkJson(data, (o) => {
+        const title = typeof o.name === 'string' ? o.name : typeof o.title === 'string' ? o.title : null;
+        if (!title || title.length < 3) return;
+        const price = jsonPrice(o);
+        if (price == null) return;
+        const image = jsonImage(o);
+        // passt der Name zum Link? Dann ist es sehr wahrscheinlich das richtige Produkt
+        const overlap = slugOverlap(slug, title);
+        const score = overlap * 3 + (image ? 1 : 0) + (o.sku || o.id ? 0.5 : 0);
+        if (!best || score > best.score) best = { score, title, price, image, brand: jsonBrand(o) };
+      });
+    }
+    return best ? strip({ title: best.title, price: best.price, image: best.image, brand: best.brand }) : {};
+  }
+
+  function walkJson(root, visit) {
+    let seen = 0;
+    const stack = [[root, 0]];
+    while (stack.length && seen < 20000) {
+      const [n, depth] = stack.pop();
+      if (!n || typeof n !== 'object' || depth > 14) continue;
+      seen++;
+      if (!Array.isArray(n)) visit(n);
+      for (const v of Object.values(n)) if (v && typeof v === 'object') stack.push([v, depth + 1]);
+    }
+  }
+
+  function jsonPrice(o) {
+    const keys = ['price', 'salePrice', 'sale_price', 'finalPrice', 'currentPrice', 'priceGross', 'unitPrice', 'amount'];
+    for (const k of keys) {
+      const v = o[k];
+      if (v == null) continue;
+      if (typeof v === 'object') {
+        const inner = v.amount ?? v.value ?? v.gross ?? v.formatted ?? v.raw;
+        const p = parsePrice(inner);
+        if (p) return p;
+      } else {
+        const p = parsePrice(v);
+        if (p) return p;
+      }
+    }
+    for (const k of ['priceCents', 'price_cents', 'priceInCents']) if (Number.isFinite(o[k])) return o[k] / 100;
+    const variant = Array.isArray(o.variants) ? o.variants[0] : null;
+    return variant && variant !== o ? jsonPrice(variant) : null;
+  }
+
+  function jsonImage(o) {
+    const pick = (v) => {
+      if (!v) return null;
+      if (typeof v === 'string') return /\.(jpe?g|png|webp|avif|gif)|\/image|cdn/i.test(v) ? v : null;
+      if (Array.isArray(v)) return pick(v[0]);
+      if (typeof v === 'object') return pick(v.src || v.url || v.originalSrc || v.large || v.full || v.path || v.image);
+      return null;
+    };
+    return (
+      pick(o.image) || pick(o.images) || pick(o.featuredImage) || pick(o.featured_image) || pick(o.media) ||
+      pick(o.thumbnail) || pick(o.cover) || pick(o.picture) || null
+    );
+  }
+
+  function jsonBrand(o) {
+    const b = o.brand || o.vendor || o.manufacturer;
+    return typeof b === 'string' ? b : b?.name || null;
+  }
+
+  function normalizeSlug(u) {
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+    return tokensOf(last.replace(/\.(html?|php)$/i, ''));
+  }
+  function tokensOf(s) {
+    return String(s).toLowerCase().split(/[^a-z0-9äöüß]+/).filter((t) => t.length > 1);
+  }
+  function slugOverlap(slug, title) {
+    if (!slug.length) return 0;
+    const t = new Set(tokensOf(title));
+    return slug.filter((x) => t.has(x)).length / slug.length;
+  }
+
+  // Name aus dem Link, z.B. /products/RXD-Mauspad-Black-900x400x3mm -> "RXD Mauspad Black 900x400x3mm"
+  function titleFromUrl(u) {
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
+    const t = last.replace(/\.(html?|php)$/i, '').replace(/[-_+]+/g, ' ').trim();
+    return t.length > 2 && !/^\d+$/.test(t) ? t : null;
+  }
+
+  // Letzter Ausweg: sichtbare Seite lesen (Überschrift, Preis-Elemente, großes Bild)
+  function fromDom(doc) {
+    const h1 = text(doc.querySelector('h1'));
+    let price = null;
+    for (const el of doc.querySelectorAll(
+      '[itemprop=price], [data-price], .price, .product-price, .product__price, [class*="price" i], [id*="price" i]',
+    )) {
+      const v = el.getAttribute('content') || el.getAttribute('data-price') || text(el);
+      if (/\d/.test(v) && /€|eur|\d[.,]\d{2}/i.test(v)) {
+        price = parsePrice(v.match(/\d[\d.,]*/)?.[0]);
+        if (price) break;
+      }
+    }
+    let image = null;
+    for (const img of doc.querySelectorAll('main img, [class*="product" i] img, img')) {
+      const src = img.getAttribute('src') || img.getAttribute('data-src') || (img.getAttribute('srcset') || '').split(' ')[0];
+      if (src && !/logo|icon|sprite|payment|flag|avatar|\.svg/i.test(src) && !src.startsWith('data:')) {
+        image = src;
+        break;
+      }
+    }
+    return strip({ title: h1, price, image });
   }
 
   async function extractShopify(u) {
