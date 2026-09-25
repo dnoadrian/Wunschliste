@@ -388,9 +388,9 @@ window.WLUtil = WLUtil;
 
   const KEY = 'wunschliste.items';
   /*
-   * >>> HIER DEINE WORKER-ADRESSE EINTRAGEN (siehe worker.js) <<<
-   * z.B. 'https://wunschliste-proxy.deinname.workers.dev'
-   * Leer lassen = öffentliche Proxys (langsam und oft blockiert)
+   * Nur nötig, wenn die Seite NICHT auf dem Cloudflare Worker läuft (z.B. GitHub Pages):
+   * dann hier die Worker-Adresse eintragen, z.B. 'https://w.deinname.workers.dev'.
+   * Auf *.workers.dev wird der eingebaute Proxy automatisch benutzt.
    */
   const EIGENER_PROXY = '';
 
@@ -422,7 +422,9 @@ window.WLUtil = WLUtil;
   /* ------------------------------------------------------------ Abruf */
 
   function proxies() {
-    if (EIGENER_PROXY) return [(u) => `${EIGENER_PROXY.replace(/\/+$/, '')}/?url=${encodeURIComponent(u)}`];
+    if (EIGENER_PROXY) return [(u) => `${EIGENER_PROXY.replace(/\/+$/, '')}/proxy?url=${encodeURIComponent(u)}`];
+    // Läuft die Seite auf dem Cloudflare Worker, gibt es den Proxy unter /proxy auf derselben Adresse
+    if (/\.workers\.dev$/.test(location.hostname)) return [(u) => `/proxy?url=${encodeURIComponent(u)}`];
     return PROXIES;
   }
 
@@ -459,7 +461,7 @@ window.WLUtil = WLUtil;
       throw new Error(
         EIGENER_PROXY
           ? `shop nicht erreichbar (${why})`
-          : `öffentliche proxys blockiert (${why}) – eigenen worker eintragen, siehe worker.js`,
+          : `öffentliche proxys blockiert (${why}) – seite über den cloudflare worker öffnen`,
       );
     }
   }
