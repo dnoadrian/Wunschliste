@@ -41,10 +41,14 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 
 ## Veröffentlichen (Cloudflare)
 
-Der Worker `wishly` ist mit diesem Repo (`dnoadrian/wishly`) verbunden (Settings → Build): jeder Push auf `main` wird automatisch gebaut und veröffentlicht.
-Der Speicher für die Konten (Durable Object `Account`) wird dabei automatisch angelegt.
+Jeder Push auf `main` wird von GitHub Actions (`.github/workflows/deploy.yml`) mit `wrangler deploy` veröffentlicht.
+Dafür braucht das Repo zwei Secrets (Settings → Secrets and variables → Actions):
 
-Wichtig: `"name"` in `wrangler.jsonc` muss zum Namen des Workers in Cloudflare passen.
+- `CLOUDFLARE_API_TOKEN` – in Cloudflare: Profil → API Tokens → Create Token → Vorlage „Edit Cloudflare Workers“
+- `CLOUDFLARE_ACCOUNT_ID` – die Konto-ID (steht in der Dashboard-Adresse `dash.cloudflare.com/<konto-id>/…`)
+
+Veröffentlichung von Hand: Actions → Cloudflare Deploy → Run workflow.
+Der Speicher für die Konten (Durable Object `Account`) und die Route `dnoadrian.at/wishly*` stehen in `wrangler.jsonc`.
 
 ## Fehlersuche
 

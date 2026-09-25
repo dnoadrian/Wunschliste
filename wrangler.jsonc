@@ -3,6 +3,9 @@
   "name": "wishly",
   "main": "worker.js",
   "compatibility_date": "2025-09-01",
+  // erreichbar unter wishly.<konto>.workers.dev und dnoadrian.at/wishly
+  "workers_dev": true,
+  "routes": [{ "pattern": "dnoadrian.at/wishly*", "zone_name": "dnoadrian.at" }],
   "assets": {
     "directory": ".",
     "binding": "ASSETS"
