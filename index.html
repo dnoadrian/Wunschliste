@@ -309,7 +309,7 @@ select {
         <p class="card__meta"></p>
         <div class="card__actions">
           <a class="card__src" target="_blank" rel="noopener">[ zum produkt ]</a>
-          <button type="button" class="card__set" title="preis selbst festlegen">[ ✎ preis ]</button>
+          <button type="button" class="card__set" title="preis selbst festlegen">[ preis eingeben ]</button>
           <button type="button" class="card__rm">[ entfernen ]</button>
         </div>
       </div>
@@ -1323,11 +1323,13 @@ window.WLUtil = WLUtil;
       patch = await resolve(item.sourceUrl || item.url);
       // erkannten Shop-Preis immer merken (zum Vergleich, falls der Preis manuell gesetzt ist)
       patch.detectedPrice = patch.price ?? item.detectedPrice ?? null;
-      if (item.manualPrice != null) {
-        // selbst gesetzter Preis gilt, bis er zurückgesetzt wird
+      if (patch.price != null) {
+        patch.manualPrice = null; // Shop liefert (wieder) einen Preis -> der gilt
+      } else if (item.manualPrice != null) {
+        // kein Preis gefunden: selbst eingetragener Preis gilt
         patch.price = item.manualPrice;
         patch.error = null;
-      } else if (patch.price == null) patch.price = item.price; // bekannten Preis behalten
+      } else patch.price = item.price; // bekannten Preis behalten
       if (!patch.image) patch.image = item.image;
     } catch (e) {
       patch = { error: e.message, checkedAt: new Date().toISOString() };
@@ -1505,19 +1507,19 @@ function render() {
       shopEl.textContent += ` · original ${orig}${item.rateApprox ? ' (kurs ca.)' : ''}`;
     }
     if (item.manualPrice != null) {
-      shopEl.textContent += ' · preis selbst gesetzt';
-      if (item.detectedPrice != null && Math.abs(item.detectedPrice - item.manualPrice) > 0.005) {
-        shopEl.textContent += ` (shop-erkennung: ${eur(item.detectedPrice)})`;
-      }
+      shopEl.textContent += ' · preis selbst eingetragen';
     }
 
     const err = $('.card__meta', el);
     if (item.error) err.textContent = item.error;
     else err.remove();
 
+    // Bearbeiten nur, wenn der Shop keinen Preis liefert
     const setBtn = $('.card__set', el);
-    setBtn.onclick = () => enterPrice(item);
-    if (item.price == null) setBtn.textContent = '[ ✎ preis eingeben ]';
+    if (item.price == null || item.manualPrice != null) {
+      setBtn.onclick = () => enterPrice(item);
+      if (item.manualPrice != null) setBtn.textContent = '[ preis ändern ]';
+    } else setBtn.remove();
 
     $('.card__src', el).href = item.url;
     $('.card__rm', el).onclick = () => removeItem(item);
@@ -1592,7 +1594,7 @@ async function refreshAll() {
 }
 
 function enterPrice(item) {
-  const hint = item.manualPrice != null ? '\n(leer lassen = wieder automatisch erkennen)' : '';
+  const hint = item.manualPrice != null ? '\n(leer lassen = eintrag löschen)' : '';
   const input = prompt(`Preis in Euro für "${item.title}":${hint}`, item.price != null ? item.price.toFixed(2).replace('.', ',') : '');
   if (input == null) return;
   if (!input.trim()) {
@@ -1600,7 +1602,7 @@ function enterPrice(item) {
     const fresh = W.setPrice(item.id, null);
     items[items.findIndex((x) => x.id === item.id)] = fresh;
     render();
-    return status(`${item.title}: preis wieder automatisch → ${eur(fresh.price)}`, 'ok');
+    return status(`${item.title}: eingetragener preis gelöscht`, 'ok');
   }
   const value = parseFloat(input.replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3})/g, '').replace(',', '.'));
   if (!Number.isFinite(value) || value <= 0) return status('ungültiger preis', 'err');
