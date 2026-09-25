@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Wunschliste",
-  "short_name": "Wunschliste",
-  "description": "Gaming-Wunschliste: Link rein, Foto, Name und Preis raus.",
+  "name": "Wishly",
+  "short_name": "Wishly",
+  "description": "Wishly – Gaming-Wunschliste: Link rein, Foto, Name und Preis raus.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -49,5 +49,19 @@
       "text": "text",
       "url": "url"
     }
-  }
+  },
+  "shortcuts": [
+    {
+      "name": "Produkt hinzufügen",
+      "short_name": "Hinzufügen",
+      "url": "/?add",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
 }

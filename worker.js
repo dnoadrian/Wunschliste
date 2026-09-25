@@ -1,5 +1,5 @@
 /*
- * Cloudflare Worker: liefert die Wunschliste (index.html) aus
+ * Cloudflare Worker für Wishly: liefert die Seite (index.html) aus
  * und ist gleichzeitig der Proxy, über den die Seite Shopseiten lädt.
  *
  *   https://<worker>.workers.dev/                 -> Webseite

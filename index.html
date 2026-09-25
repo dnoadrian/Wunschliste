@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Wunschliste</title>
-  <meta name="description" content="Wunschliste: Produktlink einfügen, Foto, Name und aktuellen Preis sehen.">
+  <title>Wishly</title>
+  <meta name="description" content="Wishly – Gaming-Wunschliste: Produktlink einfügen, Foto, Name und aktuellen Preis sehen.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
@@ -16,7 +16,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Wunschliste">
+  <meta name="apple-mobile-web-app-title" content="Wishly">
+  <meta name="application-name" content="Wishly">
   <style>
   /* Stil wie der Enchantment Tracker: Pixel-Schrift, dunkle Kästen, 2px-Rahmen, weißes Leuchten */
   :root {
@@ -40,6 +41,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   [hidden] { display: none !important; }
 
+  html { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
   body {
     background: var(--bg);
     color: var(--text);
@@ -159,7 +161,6 @@
     text-shadow: 0 0 8px rgba(255,255,255,0.3);
     text-transform: uppercase;
   }
-  .section-icon { color: #aaaaaa; }
   .section-title { flex-wrap: nowrap; }
   .section-title #list-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .section-title .tools { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; letter-spacing: 0; text-shadow: none; }
@@ -226,7 +227,7 @@
   .modal--danger .modal__box { background: var(--red-bg); border-color: var(--red); box-shadow: 0 0 20px rgba(255,85,85,0.25); }
   .modal__title { font-size: 10px; color: #fff; text-align: center; margin-bottom: 14px; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 0 8px rgba(255,255,255,0.4); }
   .modal--danger .modal__title { color: var(--red); text-shadow: 0 0 8px rgba(255,85,85,0.4); }
-  .modal__text { font-size: 8px; color: var(--text); margin-bottom: 14px; word-break: break-word; }
+  .modal__text { font-size: 8px; color: var(--text); margin-bottom: 14px; word-break: break-word; white-space: pre-line; line-height: 2.2; }
   .modal__field[hidden] { display: none; }
   .modal__field .input { width: 100%; }
   .modal__hint { font-size: 6px; color: var(--text-muted); margin-top: 8px; }
@@ -249,14 +250,14 @@
 <div class="page">
 
   <header>
-    <h1><span>WUNSCH</span>LISTE</h1>
+    <h1><span>WISH</span>LY</h1>
     <p class="userline" id="install-line" hidden><button type="button" class="btn btn--green btn--small" id="install">&#8681; APP INSTALLIEREN</button></p>
     <p class="userline" id="userline" hidden>USER: <b id="whoami">&ndash;</b> <button type="button" class="btn btn--red btn--small" id="logout">LOGOUT</button></p>
   </header>
 
   <section class="login box" id="login" hidden>
     <form id="login-form" autocomplete="on">
-      <div class="section-title"><span class="section-icon">&#9670;</span> LOGIN</div>
+      <div class="section-title">LOGIN</div>
       <p class="login__hint">Gibt es den Namen noch nicht, wird automatisch ein neues Konto erstellt.</p>
       <div class="field">
         <input class="input" id="login-user" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" placeholder="BENUTZER" aria-label="Benutzer" required>
@@ -298,7 +299,7 @@
 
     <section class="section">
       <div class="section-title">
-        <span class="section-icon">&#9670;</span> <span id="list-title">MAIN</span>
+        <span id="list-title">MAIN</span>
         <span class="tools">
           <button type="button" class="btn btn--small" id="refresh">&#8635; AKTUALISIEREN</button>
         </span>
@@ -308,12 +309,12 @@
     </section>
   </div>
 
-  <footer>Wunschliste v3.0</footer>
+  <footer>Wishly v1.0</footer>
 </div>
 
   <div class="modal" id="modal" hidden>
     <form class="modal__box" id="modal-form" role="dialog" aria-modal="true" aria-labelledby="modal-title" autocomplete="off">
-      <p class="modal__title">&#9670; <span id="modal-title"></span> &#9670;</p>
+      <p class="modal__title"><span id="modal-title"></span></p>
       <p class="modal__text" id="modal-text"></p>
       <div class="modal__field" id="modal-field"><input class="input" id="modal-input" spellcheck="false"></div>
       <p class="modal__hint" id="modal-hint"></p>
@@ -1607,7 +1608,7 @@ function openList(id) {
 
 let modalDone = null;
 // ask({ title, text, input?: { value, placeholder, mode }, hint, ok, danger }) -> Text (Eingabe) / true (Bestätigung) / null (abgebrochen)
-function ask({ title = 'wunschliste', text = '', input = null, hint = '', ok = 'ok', danger = false }) {
+function ask({ title = 'wishly', text = '', input = null, hint = '', ok = 'ok', danger = false, cancel = true }) {
   if (modalDone) modalDone(null);
   const modal = $('#modal');
   $('#modal-title').textContent = title;
@@ -1615,6 +1616,7 @@ function ask({ title = 'wunschliste', text = '', input = null, hint = '', ok = '
   $('#modal-hint').textContent = hint;
   $('#modal-ok').textContent = ok.toUpperCase();
   $('#modal-ok').className = `btn ${danger ? 'btn--red' : 'btn--green'}`;
+  $('#modal-cancel').hidden = !cancel; // reine Hinweise brauchen kein "Abbrechen"
   modal.classList.toggle('modal--danger', danger);
   const field = $('#modal-field');
   const inp = $('#modal-input');
@@ -1991,33 +1993,102 @@ A.onSessionLost(() => {
 // Aus dem "Teilen"-Menü einer anderen App: /?url=…&text=…&title=… -> Link automatisch hinzufügen
 const shareParams = new URLSearchParams(location.search);
 let pendingShare = ['url', 'text', 'title'].map((k) => shareParams.get(k) || '').join(' ').trim() || null;
-if (pendingShare) history.replaceState(null, '', location.pathname);
+// App-Kurzbefehl "Produkt hinzufügen" (langes Tippen aufs Icon): /?add -> gleich ins Eingabefeld
+const wantsAdd = shareParams.has('add');
+if (pendingShare || wantsAdd) history.replaceState(null, '', location.pathname);
 
 function takeShare() {
+  if (wantsAdd && !pendingShare) {
+    $('#url').focus();
+    $('#add').scrollIntoView({ block: 'center' });
+    return;
+  }
   if (!pendingShare) return;
   $('#url').value = pendingShare;
   pendingShare = null;
   $('#add').requestSubmit();
 }
 
-// App installieren (Android/Chrome/Edge): eigener Knopf statt Browser-Menü
+/*
+ * App installieren.
+ * Der Knopf ist sichtbar, solange die App nicht als App läuft. Chrome/Edge liefern nicht immer ein
+ * Installations-Ereignis (z.B. nach einmal "Abbrechen" oder in anderen Browsern) – dann zeigt der Knopf
+ * eine Anleitung für genau dieses Gerät.
+ */
+const INSTALLED_KEY = 'wishly.installed';
 let installPrompt = null;
+const runningAsApp = () =>
+  matchMedia('(display-mode: standalone)').matches ||
+  matchMedia('(display-mode: fullscreen)').matches ||
+  matchMedia('(display-mode: minimal-ui)').matches ||
+  navigator.standalone === true;
+const storedInstalled = () => {
+  try {
+    return localStorage.getItem(INSTALLED_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+function updateInstallButton() {
+  // in der App selbst nie; im Browser nur, wenn nicht schon installiert (oder der Browser sagt, dass es geht)
+  $('#install-line').hidden = runningAsApp() || (storedInstalled() && !installPrompt);
+}
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
-  installPrompt = e;
-  $('#install-line').hidden = false;
+  installPrompt = e; // der Browser bietet die Installation an -> sicher noch nicht installiert
+  try {
+    localStorage.removeItem(INSTALLED_KEY);
+  } catch {}
+  updateInstallButton();
 });
 window.addEventListener('appinstalled', () => {
   installPrompt = null;
-  $('#install-line').hidden = true;
-  status('app installiert – du findest sie jetzt bei deinen apps', 'ok');
+  try {
+    localStorage.setItem(INSTALLED_KEY, '1');
+  } catch {}
+  updateInstallButton();
+  status('wishly installiert – du findest die app jetzt bei deinen apps', 'ok');
 });
+matchMedia('(display-mode: standalone)').addEventListener?.('change', updateInstallButton);
+
+function installSteps() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (ios) return 'unten in der leiste auf teilen (□↑) tippen\n→ „zum home-bildschirm“\n→ „hinzufügen“';
+  if (/SamsungBrowser/.test(ua)) return 'unten rechts auf menü (☰) tippen\n→ „seite hinzufügen zu“\n→ „startbildschirm“';
+  if (/Android/.test(ua) && /Firefox/.test(ua)) return 'oben rechts auf ⋮ tippen\n→ „installieren“\n(oder „zum startbildschirm hinzufügen“)';
+  if (/Android/.test(ua)) return 'oben rechts auf ⋮ tippen\n→ „app installieren“\n(oder „zum startbildschirm hinzufügen“)\n→ „installieren“';
+  if (/Edg\//.test(ua)) return 'oben rechts auf … klicken\n→ „apps“\n→ „diese website als app installieren“';
+  if (/Chrome\//.test(ua)) return 'rechts in der adressleiste auf das installieren-symbol (⊕) klicken\noder: ⋮ → „streamen, speichern und teilen“ → „seite als app installieren“';
+  if (/Safari\//.test(ua) && /Mac/.test(ua)) return 'oben im menü: ablage → „zum dock hinzufügen“';
+  return 'dieser browser kann keine apps installieren.\nöffne die seite in chrome oder edge.';
+}
+
 $('#install').addEventListener('click', async () => {
-  if (!installPrompt) return;
-  installPrompt.prompt();
-  await installPrompt.userChoice.catch(() => null);
-  installPrompt = null;
-  $('#install-line').hidden = true;
+  if (installPrompt) {
+    const p = installPrompt;
+    installPrompt = null;
+    p.prompt();
+    const choice = await p.userChoice.catch(() => null);
+    if (choice?.outcome === 'accepted') {
+      try {
+        localStorage.setItem(INSTALLED_KEY, '1');
+      } catch {}
+    }
+    updateInstallButton();
+    return;
+  }
+  await ask({ title: 'app installieren', text: `so installierst du wishly:\n\n${installSteps()}`, ok: 'verstanden', cancel: false });
+});
+updateInstallButton();
+
+// In der installierten App gibt es kein "Neu laden": kommt sie nach 30 Min. wieder in den Vordergrund, zählt das wie Öffnen
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return void (hiddenAt = Date.now());
+  if (runningAsApp() && hiddenAt && Date.now() - hiddenAt > 30 * 60e3 && navigator.onLine && !document.body.classList.contains('locked')) {
+    refreshAll(true);
+  }
 });
 
 // Service Worker: App startet schnell und auch kurz ohne Netz

@@ -1,6 +1,6 @@
-# Wunschliste
+# Wishly
 
-Gaming-Wunschliste im Pixel-Stil (wie der Enchantment Tracker).
+**Wishly** – Gaming-Wunschliste im Pixel-Stil (wie der Enchantment Tracker).
 Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (inkl. Farbe/Größe aus dem Link).
 
 ## Funktionen
@@ -16,8 +16,10 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
   Unbekannter Name = neues Konto
 - **Preis eingeben**, wenn keiner oder nur ein unsicherer gefunden wurde
 - Sortiert nach Preis (teuerstes zuerst), Gesamtpreis der Liste oben
-- **Als App installierbar** (Android/Chrome: Knopf „APP INSTALLIEREN“ oder Menü ⋮ → „App installieren“):
-  eigenes Icon, Vollbild, startet auch ohne Netz, erscheint im **Teilen-Menü** anderer Apps
+- **Als App installierbar:** Knopf „APP INSTALLIEREN“ (ist sichtbar, solange die App nicht installiert ist;
+  kann der Browser nicht direkt installieren, zeigt er die Schritte für Android, iPhone, Samsung, PC).
+  Eigenes Icon, Vollbild, startet auch ohne Netz, erscheint im **Teilen-Menü** anderer Apps,
+  Kurzbefehl „Produkt hinzufügen“ beim langen Tippen aufs Icon
 
 ## Aufbau
 

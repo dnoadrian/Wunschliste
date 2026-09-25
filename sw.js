@@ -1,10 +1,10 @@
 /*
- * Service Worker der Wunschliste-App:
+ * Service Worker der Wishly-App:
  * - Seite und Icons werden zwischengespeichert -> App startet schnell und auch ohne Netz
  * - die Seite kommt immer zuerst frisch vom Server (neue Versionen sofort da)
  * - Preise (/proxy), Konten (/api) und Diagnose werden NIE zwischengespeichert
  */
-const CACHE = 'wunschliste-v1';
+const CACHE = 'wishly-v2';
 const SHELL = ['./', 'favicon.svg', 'favicon-32.png', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
