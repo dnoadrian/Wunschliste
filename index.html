@@ -105,7 +105,7 @@ body.locked #app, body.locked .total { display: none; }
   outline: 0; padding: 6px 0; caret-color: #fff;
 }
 .login__row input:focus { border-bottom-color: var(--dim); }
-.login__actions { display: flex; gap: 18px; flex-wrap: wrap; margin: 16px 0; }
+.login__actions { display: flex; gap: 18px; flex-wrap: wrap; margin: 16px 0 18px; }
 .login .statusline { margin: 0 -18px; }
 .titlebar__logout { font-size: 12px; color: var(--dim); }
 .titlebar__logout:hover { color: #fff; }
@@ -283,12 +283,12 @@ select {
     <section class="login" id="login" hidden>
       <form class="login__box" id="login-form" autocomplete="on">
         <p class="login__title">&gt; login</p>
-        <p class="dim login__hint">gib deinen namen ein. deine wunschlisten werden unter diesem namen gespeichert und sind auf jedem gerät gleich. neuer name = neuer benutzer.</p>
+        <p class="dim login__hint">gibt es den namen noch nicht, wird automatisch ein neues konto erstellt.</p>
         <label class="login__row"><span>benutzer</span><input id="login-user" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" required></label>
         <div class="login__actions">
           <button type="submit" id="login-btn">[ anmelden ]</button>
         </div>
-        <p class="statusline" id="login-status" role="status" aria-live="polite">benutzer eingeben</p>
+        <p class="statusline" id="login-status" role="status" aria-live="polite" hidden></p>
       </form>
     </section>
 
@@ -1821,6 +1821,7 @@ const A = W.account;
 
 function loginStatus(text, state = '') {
   const el = $('#login-status');
+  el.hidden = !text; // Zeile nur bei einer Meldung zeigen
   el.textContent = text;
   el.dataset.state = state;
 }
@@ -1830,7 +1831,7 @@ function showLogin(msg) {
   $('#login').hidden = false;
   $('#logout').hidden = true;
   $('#whoami').textContent = '–';
-  loginStatus(msg || 'benutzer eingeben');
+  loginStatus(msg || '');
   setTimeout(() => $('#login-user').focus(), 50);
 }
 
@@ -1853,7 +1854,7 @@ function startApp() {
 
 async function signIn() {
   const user = $('#login-user').value.trim();
-  if (!user) return loginStatus('benutzer eingeben', 'err');
+  if (!user) return $('#login-user').focus();
   $('#login-btn').disabled = true;
   loginStatus('melde an …', 'busy');
   try {
