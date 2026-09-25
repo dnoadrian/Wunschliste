@@ -92,6 +92,21 @@ a:hover { text-shadow: var(--glow); }
   overflow: hidden;
 }
 
+/* Listen */
+.lists {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: 0 24px 14px; font-size: 13px;
+}
+.lists__tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.lists__tab { border: 1px solid var(--line); padding: 3px 10px; color: var(--dim); }
+.lists__tab:hover { color: var(--text); border-color: var(--dim); }
+.lists__tab[aria-current="true"] { background: #fff; color: #000; border-color: #fff; font-weight: 600; text-shadow: none; }
+.lists__tab small { opacity: .6; margin-left: 4px; }
+.lists__new { color: var(--text); }
+.lists__edit { margin-left: auto; display: flex; gap: 12px; font-size: 12px; }
+.lists__edit button { color: var(--dim); }
+.lists__edit button:hover { color: var(--text); }
+
 /* Eingabe */
 .add { margin: 0 24px; border: 1px solid var(--line); background: #000; }
 .add__label { display: block; padding: 10px 14px 0; color: var(--dim); font-size: 12px; }
@@ -215,7 +230,8 @@ select {
 
 @media (max-width: 640px) {
   .window { margin: 0; border-left: 0; border-right: 0; }
-  .banner, .add, .toolbar, .grid, .empty { margin-left: 16px; margin-right: 16px; }
+  .banner, .lists, .add, .toolbar, .grid, .empty { margin-left: 16px; margin-right: 16px; }
+  .lists__edit { margin-left: 0; width: 100%; }
   .add__row { flex-wrap: wrap; }
   .add__row > span { display: none; }
   .add input { flex-basis: 100%; }
@@ -247,6 +263,16 @@ select {
 ╚███╔███╔╝╚██████╔╝██║ ╚████║███████║╚██████╗██║  ██║███████╗██║███████║   ██║   ███████╗
  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝╚══════╝   ╚═╝   ╚══════╝</pre>
 
+    <nav class="lists" aria-label="Listen">
+      <span class="dim">&gt; listen:</span>
+      <span class="lists__tabs" id="lists"></span>
+      <button type="button" class="lists__new" id="new-list">[ + neue liste ]</button>
+      <span class="lists__edit">
+        <button type="button" id="rename-list">umbenennen</button>
+        <button type="button" id="delete-list">löschen</button>
+      </span>
+    </nav>
+
     <form class="add" id="add" autocomplete="off">
       <label for="url" class="add__label">produkt hinzufügen: link einfügen</label>
       <div class="add__row">
@@ -258,7 +284,7 @@ select {
     </form>
 
     <section class="toolbar">
-      <span class="dim">&gt; meine wunschliste</span>
+      <span class="dim">&gt; <span id="list-name">wunschliste</span></span>
       <span class="toolbar__actions">
         <button type="button" id="refresh">[ ↻ preise aktualisieren ]</button>
       </span>
@@ -270,7 +296,7 @@ select {
 
   <footer class="total">
     <div><span class="dim">produkte</span> <b id="count">0</b></div>
-    <div class="total__sum"><span class="dim">gesamt</span> <b id="sum">—</b></div>
+    <div class="total__sum"><span class="dim">gesamt · <span id="total-name">main</span></span> <b id="sum">—</b></div>
   </footer>
 
   <template id="card">
@@ -405,19 +431,87 @@ window.WLUtil = WLUtil;
 
   /* ------------------------------------------------------------ Speicher */
 
-  function load() {
+  // Mehrere Listen: "Main" nutzt den alten Speicherplatz, damit bestehende Produkte erhalten bleiben
+  const LISTS_KEY = 'wunschliste.lists';
+  const ACTIVE_KEY = 'wunschliste.active';
+  const DEFAULT_LISTS = [
+    { id: 'main', name: 'Main' },
+    { id: 'weihnachten', name: 'Weihnachten' },
+  ];
+  const itemsKey = (lid) => (lid === 'main' ? KEY : `${KEY}.${lid}`);
+
+  function read(key, fallback) {
     try {
-      return JSON.parse(localStorage.getItem(KEY)) || [];
+      return JSON.parse(localStorage.getItem(key)) ?? fallback;
     } catch {
-      return [];
+      return fallback;
     }
   }
-  function save(items) {
+  function write(key, value) {
     try {
-      localStorage.setItem(KEY, JSON.stringify(items));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
       /* privater Modus o.ä. */
     }
+  }
+
+  let lists = read(LISTS_KEY, null);
+  if (!Array.isArray(lists) || !lists.length) {
+    lists = DEFAULT_LISTS.map((l) => ({ ...l }));
+    write(LISTS_KEY, lists);
+  }
+  let activeId = read(ACTIVE_KEY, 'main');
+  if (!lists.some((l) => l.id === activeId)) activeId = lists[0].id;
+
+  function load(lid = activeId) {
+    const items = read(itemsKey(lid), []);
+    return Array.isArray(items) ? items : [];
+  }
+  function save(items, lid = activeId) {
+    write(itemsKey(lid), items);
+  }
+
+  /* ---- Listen verwalten ---- */
+
+  const getLists = () => lists.map((l) => ({ ...l, count: load(l.id).length }));
+  const getActive = () => lists.find((l) => l.id === activeId);
+
+  function switchTo(id) {
+    if (!lists.some((l) => l.id === id)) throw new Error('liste nicht gefunden');
+    activeId = id;
+    write(ACTIVE_KEY, id);
+  }
+
+  function createList(name) {
+    name = String(name || '').trim().slice(0, 40);
+    if (!name) throw new Error('name fehlt');
+    if (lists.some((l) => l.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${name}" gibt es schon`);
+    const base = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'liste';
+    let id = base;
+    for (let n = 2; lists.some((l) => l.id === id) || id === 'main'; n++) id = `${base}-${n}`;
+    lists.push({ id, name });
+    write(LISTS_KEY, lists);
+    return { id, name };
+  }
+
+  function renameList(id, name) {
+    name = String(name || '').trim().slice(0, 40);
+    if (!name) throw new Error('name fehlt');
+    const l = lists.find((x) => x.id === id);
+    if (!l) throw new Error('liste nicht gefunden');
+    if (lists.some((x) => x.id !== id && x.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${name}" gibt es schon`);
+    l.name = name;
+    write(LISTS_KEY, lists);
+  }
+
+  function deleteList(id) {
+    if (lists.length <= 1) throw new Error('die letzte liste kann nicht gelöscht werden');
+    lists = lists.filter((l) => l.id !== id);
+    write(LISTS_KEY, lists);
+    try {
+      localStorage.removeItem(itemsKey(id));
+    } catch {}
+    if (activeId === id) switchTo(lists[0].id);
   }
 
   /* ------------------------------------------------------------ Abruf */
@@ -1184,15 +1278,17 @@ window.WLUtil = WLUtil;
 
   async function add(url) {
     if (!/^https?:\/\//i.test(url || '')) throw new Error('gültiger link (http/https) benötigt');
+    const lid = activeId;
     const item = { id: Math.random().toString(36).slice(2, 10), ...(await resolve(url.trim())), sourceUrl: url.trim() };
-    const items = load();
+    const items = load(lid);
     items.push(item);
-    save(items);
+    save(items, lid);
     return item;
   }
 
   async function refresh(id) {
-    const item = load().find((i) => i.id === id);
+    const lid = activeId;
+    const item = load(lid).find((i) => i.id === id);
     if (!item) throw new Error('nicht gefunden');
     let patch;
     try {
@@ -1207,11 +1303,11 @@ window.WLUtil = WLUtil;
     } catch (e) {
       patch = { error: e.message, checkedAt: new Date().toISOString() };
     }
-    const items = load();
+    const items = load(lid);
     const cur = items.find((i) => i.id === id);
     if (!cur) throw new Error('nicht gefunden');
     Object.assign(cur, patch);
-    save(items);
+    save(items, lid);
     return cur;
   }
 
@@ -1229,7 +1325,20 @@ window.WLUtil = WLUtil;
   }
 
   // inspect: Produkt nur auslesen, ohne es zu speichern (für test.html)
-  window.Wishlist = { all, add, refresh, remove, setPrice, inspect: resolve };
+  window.Wishlist = {
+    all,
+    add,
+    refresh,
+    remove,
+    setPrice,
+    inspect: resolve,
+    lists: getLists,
+    active: getActive,
+    switchTo,
+    createList,
+    renameList,
+    deleteList,
+  };
 })();
 
 'use strict';
@@ -1241,6 +1350,78 @@ const W = window.Wishlist;
 
 let items = [];
 const busy = new Set();
+let gen = 0; // steigt bei jedem Listenwechsel, laufende Abrufe der alten Liste zeichnen dann nicht mehr
+
+function renderLists() {
+  const box = $('#lists');
+  box.replaceChildren();
+  const active = W.active();
+  for (const l of W.lists()) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'lists__tab';
+    b.setAttribute('aria-current', String(l.id === active.id));
+    b.textContent = l.name;
+    const n = document.createElement('small');
+    n.textContent = l.count;
+    b.append(n);
+    b.onclick = () => l.id !== active.id && openList(l.id);
+    box.append(b);
+  }
+  $('#list-name').textContent = active.name.toLowerCase();
+  $('#total-name').textContent = active.name.toLowerCase();
+  $('#delete-list').hidden = W.lists().length <= 1;
+}
+
+function openList(id) {
+  W.switchTo(id);
+  gen++;
+  busy.clear();
+  items = W.all();
+  $('#refresh').disabled = false;
+  renderLists();
+  render();
+  if (items.length) refreshAll();
+  else status(`liste "${W.active().name}" ist leer. füg oben einen produktlink ein.`);
+}
+
+function newList() {
+  const name = prompt('Name der neuen Liste:', '');
+  if (name == null) return;
+  try {
+    const l = W.createList(name);
+    openList(l.id);
+    status(`liste "${l.name}" erstellt`, 'ok');
+  } catch (e) {
+    status(`fehler: ${e.message}`, 'err');
+  }
+}
+
+function renameList() {
+  const cur = W.active();
+  const name = prompt('Neuer Name:', cur.name);
+  if (name == null) return;
+  try {
+    W.renameList(cur.id, name);
+    renderLists();
+    status(`liste umbenannt in "${name.trim()}"`, 'ok');
+  } catch (e) {
+    status(`fehler: ${e.message}`, 'err');
+  }
+}
+
+function deleteList() {
+  const cur = W.active();
+  const n = W.all().length;
+  if (!confirm(`Liste "${cur.name}"${n ? ` mit ${n} Produkt${n === 1 ? '' : 'en'}` : ''} löschen?`)) return;
+  try {
+    W.deleteList(cur.id);
+    openList(W.active().id);
+    status(`liste "${cur.name}" gelöscht`);
+  } catch (e) {
+    status(`fehler: ${e.message}`, 'err');
+  }
+}
 
 function status(text, state = '') {
   const el = $('#statusline');
@@ -1303,6 +1484,8 @@ function render() {
   });
 
   $('#empty').hidden = items.length > 0;
+  const tab = $('.lists__tab[aria-current="true"] small');
+  if (tab) tab.textContent = items.length;
   const priced = items.filter((i) => i.price != null);
   $('#count').textContent = items.length;
   $('#sum').textContent = eur(priced.length ? priced.reduce((s, i) => s + i.price, 0) : null);
@@ -1313,7 +1496,15 @@ async function addItem(url) {
   btn.disabled = true;
   status('lade produkt …', 'busy');
   try {
+    const myGen = gen;
+    const listName = W.active().name;
     const item = await W.add(url);
+    if (myGen !== gen) {
+      // inzwischen andere Liste offen: Produkt liegt trotzdem in der ursprünglichen Liste
+      renderLists();
+      status(`hinzugefügt zu "${listName}": ${item.title}`, 'ok');
+      return;
+    }
     items.push(item);
     render();
     const conv = item.currency && item.currency !== 'EUR' ? ` (umgerechnet aus ${item.currency})` : '';
@@ -1331,26 +1522,30 @@ async function refreshAll() {
   const btn = $('#refresh');
   btn.disabled = true;
   let done = 0;
+  const myGen = gen;
   status(`aktualisiere preise … 0/${items.length}`, 'busy');
   const queue = [...items];
   const worker = async () => {
-    while (queue.length) {
+    while (queue.length && myGen === gen) {
       const item = queue.shift();
       busy.add(item.id);
       render();
       try {
         const fresh = await W.refresh(item.id);
+        if (myGen !== gen) return;
         const idx = items.findIndex((x) => x.id === item.id);
         if (idx >= 0) items[idx] = fresh;
       } catch {
         /* fehler steht am item */
       }
+      if (myGen !== gen) return;
       busy.delete(item.id);
       render();
       status(`aktualisiere preise … ${++done}/${items.length}`, 'busy');
     }
   };
   await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+  if (myGen !== gen) return; // andere Liste geöffnet
   status(`preise aktuell · ${new Date().toLocaleTimeString('de-AT', { timeStyle: 'short' })}`, 'ok');
   btn.disabled = false;
 }
@@ -1380,10 +1575,14 @@ $('#add').addEventListener('submit', (e) => {
   if (url) addItem(url);
 });
 $('#refresh').addEventListener('click', refreshAll);
+$('#new-list').addEventListener('click', newList);
+$('#rename-list').addEventListener('click', renameList);
+$('#delete-list').addEventListener('click', deleteList);
 
 // Eingebettet in test.html (?embed): nichts laden, nichts aktualisieren
 if (!new URLSearchParams(location.search).has('embed')) {
   items = W.all();
+  renderLists();
   render();
   // Beim Öffnen der Seite: aktuellen Preis aller Produkte neu laden
   if (items.length) refreshAll();
