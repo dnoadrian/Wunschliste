@@ -706,11 +706,77 @@ window.WLUtil = WLUtil;
     return slug.filter((x) => t.has(x)).length / slug.length;
   }
 
+  /* ---- Genau die Variante aus dem Link finden (Farbe, Größe, …) ---- */
+
+  const normSize = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .replace(/(\d)\s*[x×*]\s*(?=\d)/g, '$1x')
+      .replace(/(\d)\s*mm\b/g, '$1mm');
+  const GENERIC = new Set(['products', 'product', 'produkt', 'artikel', 'detail', 'item', 'shop', 'de', 'en', 'at', 'html', 'img', 'variant']);
+
+  function urlTokens(u) {
+    const raw = decodeURIComponent(`${u.pathname} ${[...u.searchParams.values()].join(' ')}`);
+    return tokensOf(normSize(raw).replace(/[-_/+=&.]/g, ' ')).filter((t) => !GENERIC.has(t) && !/^\d{1,2}$/.test(t));
+  }
+
+  // Wie gut passt ein Kandidat (Variantenname, SKU …) zum Link?
+  function matchScore(candidate, toks, urlColors) {
+    const c = normSize(candidate);
+    const words = new Set(tokensOf(c));
+    let score = 0;
+    for (const t of toks) {
+      if (words.has(t)) score += /\d/.test(t) ? 2 : 1;
+      // Größen: "900x400x3mm" im Link passt zu "900x400" in der Variante
+      else if (/\d/.test(t) && [...words].some((w) => /\d.*x.*\d/.test(w) && (t.startsWith(w) || w.startsWith(t)))) score += 2;
+    }
+    const cc = colorKeys(candidate);
+    if (urlColors.size && cc.size) score += [...cc].some((x) => urlColors.has(x)) ? 3 : -5; // falsche Farbe = raus
+    return score;
+  }
+
+  function pickBest(list, textOf, u) {
+    const toks = urlTokens(u);
+    const urlColors = colorKeys(colorFromUrl(u.href) || '');
+    let best = null;
+    let bestScore = 0;
+    for (const x of list) {
+      const sc = matchScore(textOf(x), toks, urlColors);
+      if (sc > bestScore) {
+        best = x;
+        bestScore = sc;
+      }
+    }
+    return best;
+  }
+
   // Name aus dem Link, z.B. /products/RXD-Mauspad-Black-900x400x3mm -> "RXD Mauspad Black 900x400x3mm"
   function titleFromUrl(u) {
     const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || '');
     const t = last.replace(/\.(html?|php)$/i, '').replace(/[-_+]+/g, ' ').trim();
     return t.length > 2 && !/^\d+$/.test(t) ? t : null;
+  }
+
+  // Alte / durchgestrichene Preise (UVP, "statt", compare-at) erkennen
+  const OLD_PRICE =
+    /\bold|old-|-old|compare|\bwas\b|was-price|uvp|strike|rrp|msrp|crossed|statt|former|previous/i;
+  function isOldPrice(el) {
+    for (let n = el; n && n.nodeType === 1 && n.tagName !== 'BODY'; n = n.parentElement) {
+      if (/^(DEL|S|STRIKE)$/.test(n.tagName)) return true;
+      if (OLD_PRICE.test(`${n.className || ''} ${n.id || ''}`)) return true;
+    }
+    return false;
+  }
+  function removeOldPrices(root) {
+    root.querySelectorAll('del, s, strike').forEach((n) => n.remove());
+    root.querySelectorAll('[class], [id]').forEach((n) => {
+      if (n.isConnected && OLD_PRICE.test(`${n.className || ''} ${n.id || ''}`) && /\d/.test(n.textContent) && n.textContent.length < 80) n.remove();
+    });
+  }
+  // mehrere Beträge in einem Preisfeld ("49,99 € 39,99 €") -> der kleinste ist der aktuelle
+  function lowestAmount(v) {
+    const nums = (v.match(/\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{1,2})?/g) || []).map((x) => parsePrice(x.replace(/\s/g, ''))).filter(Boolean);
+    return nums.length ? Math.min(...nums) : null;
   }
 
   // Letzter Ausweg: sichtbare Seite lesen (Überschrift, Preis-Elemente, großes Bild)
@@ -721,9 +787,16 @@ window.WLUtil = WLUtil;
     for (const el of doc.querySelectorAll(
       '[itemprop=price], [data-price], .price, .product-price, .product__price, [class*="price" i], [id*="price" i]',
     )) {
-      const v = (el.getAttribute('content') || el.getAttribute('data-price') || text(el)).slice(0, 200);
+      if (isOldPrice(el)) continue;
+      let v = el.getAttribute('content') || el.getAttribute('data-price');
+      if (!v) {
+        const copy = el.cloneNode(true);
+        removeOldPrices(copy);
+        v = text(copy);
+      }
+      v = v.slice(0, 200);
       if (/\d/.test(v) && /[€$£]|eur|usd|chf|\d[.,]\d{2}/i.test(v)) {
-        price = parsePrice(v.match(/\d[\d.,]*/)?.[0]);
+        price = lowestAmount(v);
         currency = currencyOf(v);
         if (price) break;
       }
@@ -757,6 +830,7 @@ window.WLUtil = WLUtil;
     const body = doc.body?.cloneNode(true);
     if (!body) return {};
     body.querySelectorAll('script, style, noscript, header, nav, footer').forEach((n) => n.remove());
+    removeOldPrices(body);
     const t = body.textContent.replace(/\s+/g, ' ');
     const num = '\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{2})?';
     const sym = '€|EUR|US\\$|USD|\\$|£|GBP|CHF';
@@ -769,7 +843,10 @@ window.WLUtil = WLUtil;
       currency: currencyOf(m[1] || m[4]),
     }));
     const hit = hits.find((h) => h.price && h.at >= start) || hits.find((h) => h.price);
-    return hit ? { price: hit.price, currency: hit.currency } : {};
+    if (!hit) return {};
+    // direkt daneben stehende Beträge (alter + neuer Preis) -> den kleineren nehmen
+    const near = hits.filter((h) => h.price && h.at >= hit.at && h.at - hit.at < 60 && h.currency === hit.currency);
+    return { price: Math.min(...near.map((h) => h.price)), currency: hit.currency };
   }
 
   /* ---- Währung ---- */
@@ -860,10 +937,9 @@ window.WLUtil = WLUtil;
     const prefix = u.pathname.slice(0, u.pathname.indexOf('/products/'));
     const p = JSON.parse(await fetchText(`${u.origin}${prefix}/products/${handle}.js`));
     const vid = u.searchParams.get('variant');
-    const urlColor = colorKeys(colorFromUrl(u.href) || '');
     const v =
       (vid && p.variants.find((x) => String(x.id) === vid)) ||
-      (urlColor.size && p.variants.find((x) => [...colorKeys(x.title)].some((c) => urlColor.has(c)))) ||
+      pickBest(p.variants, (x) => [x.title, x.sku, x.option1, x.option2, x.option3].filter(Boolean).join(' '), u) ||
       p.variants.find((x) => x.available) ||
       p.variants[0];
     const opts = (p.options || []).map((o) => (typeof o === 'string' ? o : o.name));
@@ -921,13 +997,22 @@ window.WLUtil = WLUtil;
     const products = jsonLd(doc).filter((n) => [].concat(n['@type'] || []).includes('Product'));
     if (!products.length) return {};
     const params = [...u.searchParams.values()];
-    const urlColor = colorKeys(colorFromUrl(u.href) || '');
+    const bySku = (x) => x.sku && (params.includes(String(x.sku)) || u.pathname.includes(String(x.sku)));
     const p =
-      products.find((x) => x.sku && (params.includes(String(x.sku)) || u.pathname.includes(String(x.sku)))) ||
-      (urlColor.size && products.find((x) => [...colorKeys(`${x.color || ''} ${x.name || ''}`)].some((c) => urlColor.has(c)))) ||
+      products.find(bySku) ||
+      (products.length > 1 &&
+        pickBest(products, (x) => [x.name, x.color, x.size, x.sku, x.url].filter(Boolean).join(' '), u)) ||
       products[0];
-    const offers = [].concat(p.offers || []).flatMap((o) => (o.offers ? [].concat(o.offers) : [o]));
-    const o = offers.find((x) => parsePrice(x.price ?? x.lowPrice ?? [].concat(x.priceSpecification || [])[0]?.price)) || {};
+    const offerPrice = (x) => parsePrice(x.price ?? x.lowPrice ?? [].concat(x.priceSpecification || [])[0]?.price);
+    const offers = [].concat(p.offers || []).flatMap((o) => (o.offers ? [].concat(o.offers) : [o])).filter(offerPrice);
+    // mehrere Angebote (z.B. Größen): das zum Link passende nehmen
+    const vid = u.searchParams.get('variant');
+    const o =
+      (vid && offers.find((x) => String(x.url || '').includes(vid))) ||
+      offers.find(bySku) ||
+      (offers.length > 1 && pickBest(offers, (x) => [x.name, x.sku, x.url].filter(Boolean).join(' '), u)) ||
+      offers[0] ||
+      {};
     const spec = [].concat(o.priceSpecification || [])[0] || {};
     let img = p.image;
     if (Array.isArray(img)) img = img[0];
