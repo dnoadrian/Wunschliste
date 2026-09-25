@@ -12,6 +12,8 @@ const HEADERS = {
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
   'Accept-Language': 'de-AT,de;q=0.9,en;q=0.8',
+  // Shops (v.a. Shopify) sollen Preise für Österreich in Euro liefern, nicht in ihrer Heimatwährung
+  'Cookie': 'localization=AT; cart_currency=EUR',
 };
 
 // Andere Seiten, die den Proxy zusätzlich benutzen dürfen (z.B. GitHub Pages)

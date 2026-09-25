@@ -507,8 +507,10 @@ window.WLUtil = WLUtil;
     let p = {};
 
     // Reihenfolge: genaueste Quelle zuerst, spätere füllen nur Lücken
+    const shopifyData = strip((await shopify) || {});
+    if (shopifyData.price != null) shopifyData.currency = shopifyCurrency(html, doc);
     const sources = [
-      strip((await shopify) || {}), // Shopify-kompatible Shops (auch ohne "shopify" im HTML)
+      shopifyData, // Shopify-kompatible Shops (auch ohne "shopify" im HTML)
       /amazon\./i.test(u.hostname) ? strip(extractAmazon(doc)) : {},
       fromJsonLd(doc, u),
       fromMicrodata(doc),
@@ -529,6 +531,13 @@ window.WLUtil = WLUtil;
       fromJsonRegex(html),
       fromText(doc),
     ];
+    // Liefert eine genaue Quelle schon einen Euro-Preis (z.B. Shop-Preis für Österreich),
+    // hat der Vorrang vor Umrechnen: Shops runden und rechnen mit eigenem Kurs
+    const eurSource = sources.slice(0, 5).find((x) => x.price != null && x.currency === 'EUR');
+    if (eurSource) {
+      p.price = eurSource.price;
+      p.currency = 'EUR';
+    }
     for (const src of sources) {
       const { price, currency, ...rest } = src;
       // Preis und Währung immer aus derselben Quelle übernehmen
@@ -773,6 +782,12 @@ window.WLUtil = WLUtil;
     if (/\$|\bUSD\b/i.test(s)) return 'USD';
     const code = s.trim().toUpperCase();
     return /^[A-Z]{3}$/.test(code) ? code : null;
+  }
+
+  // Währung, in der Shopify die Preise ausliefert (/products/….js hat keine Angabe)
+  function shopifyCurrency(html, doc) {
+    const m = html.match(/Shopify\.currency\s*=\s*\{[^}]*"active"\s*:\s*"([A-Z]{3})"/);
+    return (m && m[1]) || currencyOf(meta(doc, 'og:price:currency') || meta(doc, 'product:price:currency')) || null;
   }
 
   // Keine Währung angegeben: nach Zeichen auf der Seite / Shopify-Einstellung raten
