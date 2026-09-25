@@ -283,14 +283,12 @@ select {
     <section class="login" id="login" hidden>
       <form class="login__box" id="login-form" autocomplete="on">
         <p class="login__title">&gt; login</p>
-        <p class="dim login__hint">melde dich an, damit deine wunschlisten auf allen geräten gespeichert sind.</p>
+        <p class="dim login__hint">gib deinen namen ein. deine wunschlisten werden unter diesem namen gespeichert und sind auf jedem gerät gleich. neuer name = neuer benutzer.</p>
         <label class="login__row"><span>benutzer</span><input id="login-user" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" required></label>
-        <label class="login__row"><span>passwort</span><input id="login-pass" name="password" type="password" autocomplete="current-password" required></label>
         <div class="login__actions">
           <button type="submit" id="login-btn">[ anmelden ]</button>
-          <button type="button" id="register-btn">[ neu registrieren ]</button>
         </div>
-        <p class="statusline" id="login-status" role="status" aria-live="polite">benutzer und passwort eingeben</p>
+        <p class="statusline" id="login-status" role="status" aria-live="polite">benutzer eingeben</p>
       </form>
     </section>
 
@@ -605,8 +603,8 @@ window.WLUtil = WLUtil;
     return true;
   }
 
-  async function signIn(user, pass, register) {
-    const res = await call(register ? 'register' : 'login', { method: 'POST', body: { user, pass } });
+  async function signIn(user) {
+    const res = await call('login', { method: 'POST', body: { user } });
     session = { user: res.user, token: res.token };
     write(SESSION_KEY, session);
     openStore(userKeys(session.user));
@@ -1832,7 +1830,7 @@ function showLogin(msg) {
   $('#login').hidden = false;
   $('#logout').hidden = true;
   $('#whoami').textContent = '–';
-  loginStatus(msg || 'benutzer und passwort eingeben');
+  loginStatus(msg || 'benutzer eingeben');
   setTimeout(() => $('#login-user').focus(), 50);
 }
 
@@ -1853,29 +1851,26 @@ function startApp() {
   else status('bereit. füg oben einen produktlink ein.');
 }
 
-async function signIn(register) {
+async function signIn() {
   const user = $('#login-user').value.trim();
-  const pass = $('#login-pass').value;
-  if (!user || !pass) return loginStatus('benutzer und passwort eingeben', 'err');
-  $('#login-btn').disabled = $('#register-btn').disabled = true;
-  loginStatus(register ? 'registriere …' : 'melde an …', 'busy');
+  if (!user) return loginStatus('benutzer eingeben', 'err');
+  $('#login-btn').disabled = true;
+  loginStatus('melde an …', 'busy');
   try {
-    const { migrated } = await A.signIn(user, pass, register);
-    $('#login-pass').value = '';
+    const { migrated } = await A.signIn(user);
     startApp();
     if (migrated) status(`deine bisherigen listen wurden in das konto "${A.user()}" übernommen`, 'ok');
   } catch (e) {
     loginStatus(`fehler: ${e.message}`, 'err');
   } finally {
-    $('#login-btn').disabled = $('#register-btn').disabled = false;
+    $('#login-btn').disabled = false;
   }
 }
 
 $('#login-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  signIn(false);
+  signIn();
 });
-$('#register-btn').addEventListener('click', () => signIn(true));
 $('#logout').addEventListener('click', async () => {
   if (!confirm('abmelden?')) return;
   gen++;

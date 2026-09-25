@@ -164,13 +164,6 @@ const b64url = (buf) =>
   btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomToken = () => b64url(crypto.getRandomValues(new Uint8Array(32)));
 
-async function hashPassword(pass, saltB64, iterations = 100000) {
-  const salt = Uint8Array.from(atob(saltB64), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
-  return b64url(bits);
-}
-
 function sameString(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
   let diff = 0;
@@ -184,27 +177,13 @@ export class Account extends DurableObject {
     const st = this.ctx.storage;
     const body = request.method === 'GET' ? {} : await request.json();
 
-    if (route === 'register') {
-      if (await st.get('auth')) return json({ error: 'benutzer gibt es schon – bitte anmelden' }, 409);
-      if (String(body.pass || '').length < 6) return json({ error: 'passwort: mindestens 6 zeichen' }, 400);
-      const salt = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-      await st.put('auth', { name: body.user, salt, hash: await hashPassword(body.pass, salt), created: Date.now() });
-      return this.newSession(body.user, true);
-    }
-
-    if (route === 'login') {
-      const auth = await st.get('auth');
-      if (!auth) return json({ error: 'benutzer nicht gefunden – bitte registrieren' }, 404);
-      // Schutz vor Passwort-Raten: nach 10 Fehlversuchen 15 Minuten Pause
-      const fails = (await st.get('fails')) || { n: 0, until: 0 };
-      if (fails.until > Date.now()) return json({ error: 'zu viele versuche – bitte in 15 minuten wieder' }, 429);
-      if (!sameString(await hashPassword(String(body.pass || ''), auth.salt), auth.hash)) {
-        fails.n += 1;
-        if (fails.n >= 10) Object.assign(fails, { n: 0, until: Date.now() + 15 * 60e3 });
-        await st.put('fails', fails);
-        return json({ error: 'falsches passwort' }, 401);
+    // Anmelden nur mit Benutzernamen (ohne Passwort): gibt es den Namen noch nicht, wird er angelegt
+    if (route === 'login' || route === 'register') {
+      let auth = await st.get('auth');
+      if (!auth) {
+        auth = { name: body.user, created: Date.now() };
+        await st.put('auth', auth);
       }
-      await st.delete('fails');
       return this.newSession(auth.name, !(await st.get('data')));
     }
 
