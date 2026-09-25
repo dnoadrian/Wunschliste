@@ -512,6 +512,7 @@ window.WLUtil = WLUtil;
     const sources = [
       shopifyData, // Shopify-kompatible Shops (auch ohne "shopify" im HTML)
       /amazon\./i.test(u.hostname) ? strip(extractAmazon(doc)) : {},
+      fromWooVariations(doc, u),
       fromJsonLd(doc, u),
       fromMicrodata(doc),
       strip({
@@ -535,10 +536,10 @@ window.WLUtil = WLUtil;
     // hat der Vorrang vor Umrechnen: Shops runden und rechnen mit eigenem Kurs
     // Nur wenn die genaueste Quelle eine bekannte Fremdwährung hat (sonst ginge z.B. der Variantenpreis verloren)
     const first = sources.find((x) => x.price != null);
-    const SOURCE_NAMES = ['shopify', 'amazon', 'json-ld', 'microdata', 'meta-tags', 'seiten-daten', 'preisfeld', 'seiten-code', 'seitentext'];
+    const SOURCE_NAMES = ['shopify', 'amazon', 'woocommerce', 'json-ld', 'microdata', 'meta-tags', 'seiten-daten', 'preisfeld', 'seiten-code', 'seitentext'];
     const eurSource =
       first && first.currency && first.currency !== 'EUR'
-        ? sources.slice(0, 5).find((x) => x.price != null && x.currency === 'EUR')
+        ? sources.slice(0, 6).find((x) => x.price != null && x.currency === 'EUR')
         : null;
     if (eurSource) {
       p.price = eurSource.price;
@@ -644,7 +645,7 @@ window.WLUtil = WLUtil;
         if (!named || nameScore > named.nameScore) named = { nameScore, overlap, title, image };
       });
     }
-    if (!best || best.score <= 0) return {};
+    if (!best || best.score < 0) return {};
     return strip({
       // Name nur übernehmen, wenn er zum Link passt (sonst ist es evtl. nur ein Variantenname)
       title: named && named.overlap >= 0.3 ? named.title : null,
@@ -658,7 +659,7 @@ window.WLUtil = WLUtil;
   function variantText(v) {
     if (!v || typeof v !== 'object') return '';
     const opts = Array.isArray(v.options) ? v.options.map((x) => (typeof x === 'object' ? x.value || x.name : x)) : [];
-    return [v.title, v.name, v.sku, v.size, v.color, v.option1, v.option2, v.option3, ...opts]
+    return [v.title, v.name, v.sku, v.id, v.productId, v.size, v.color, v.option1, v.option2, v.option3, ...opts]
       .filter((x) => typeof x === 'string' || typeof x === 'number')
       .join(' ');
   }
@@ -743,6 +744,34 @@ window.WLUtil = WLUtil;
     return slug.filter((x) => t.has(x)).length / slug.length;
   }
 
+  // WooCommerce: Varianten stehen als JSON im Formular (data-product_variations)
+  function fromWooVariations(doc, u) {
+    const form = doc.querySelector('[data-product_variations]');
+    if (!form) return {};
+    let vars;
+    try {
+      vars = JSON.parse(form.getAttribute('data-product_variations'));
+    } catch {
+      return {};
+    }
+    if (!Array.isArray(vars) || !vars.length) return {};
+    const want = [...u.searchParams.entries()].filter(([k]) => k.startsWith('attribute_'));
+    const norm = (x) => normalizeWord(x);
+    let v = null;
+    if (want.length) {
+      v = vars.find((x) => want.every(([k, val]) => !x.attributes?.[k] || norm(x.attributes[k]) === norm(val)));
+    }
+    v = v || pickBest(vars, (x) => Object.values(x.attributes || {}).join(' '), u);
+    if (!v) return {};
+    return strip({
+      price: parsePrice(v.display_price),
+      image: v.image?.full_src || v.image?.src || v.image?.url,
+    });
+  }
+  function normalizeWord(x) {
+    return String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9]/g, '');
+  }
+
   /* ---- Genau die Variante aus dem Link finden (Farbe, Größe, …) ---- */
 
   const normSize = (s) =>
@@ -762,8 +791,11 @@ window.WLUtil = WLUtil;
     const c = normSize(candidate);
     const words = new Set(tokensOf(c));
     let score = 0;
+    const compact = normalizeWord(candidate);
     for (const t of toks) {
       if (words.has(t)) score += /\d/.test(t) ? 2 : 1;
+      // "streamdeck" im Link = "Stream Deck" im Namen
+      else if (t.length >= 4 && compact.includes(normalizeWord(t))) score += /\d/.test(t) ? 2 : 1;
       // Größen: "900x400x3mm" im Link passt zu "900x400" in der Variante
       else if (/\d/.test(t) && [...words].some((w) => /\d.*x.*\d/.test(w) && (t.startsWith(w) || w.startsWith(t)))) score += 2;
     }
@@ -777,13 +809,15 @@ window.WLUtil = WLUtil;
     const urlColors = colorKeys(colorFromUrl(u.href) || '');
     let best = null;
     let bestScore = 0;
-    for (const x of list) {
-      const sc = matchScore(textOf(x), toks, urlColors);
+    const scores = list.map((x) => matchScore(textOf(x), toks, urlColors));
+    scores.forEach((sc, i) => {
       if (sc > bestScore) {
-        best = x;
+        best = list[i];
         bestScore = sc;
       }
-    }
+    });
+    // alle gleich gut -> der Link sagt nichts über die Variante aus
+    if (scores.every((sc) => sc === bestScore)) return null;
     return best;
   }
 
@@ -815,8 +849,25 @@ window.WLUtil = WLUtil;
     });
   }
   // mehrere Beträge in einem Preisfeld ("49,99 € 39,99 €") -> der kleinste ist der aktuelle
+  // Grundpreis ("3,99 € / 1 l", "je 100 g") oder Menge ("/ 1 l") statt Produktpreis?
+  function isUnitPrice(v, at, len) {
+    const after = v.slice(at + len, at + len + 14);
+    const before = v.slice(Math.max(0, at - 4), at);
+    return /^\s*(?:[€$£]|eur|usd|chf)?\s*(?:\/|pro\b|je\b|per\b)/i.test(after) || /\/\s*$/.test(before);
+  }
+
   function lowestAmount(v) {
-    const nums = (v.match(/\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{1,2})?/g) || []).map((x) => parsePrice(x.replace(/\s/g, ''))).filter(Boolean);
+    const all = [...v.matchAll(/\d{1,3}(?:[.,\s]\d{3})*(?:[.,](?:\d{1,2}|[-–]))?/g)]
+      .filter((m) => !/^\s*%/.test(v.slice(m.index + m[0].length))) // "25 %" ist kein Preis
+      .filter((m) => !isUnitPrice(v, m.index, m[0].length))
+      .map((m) => {
+        const after = v.slice(m.index + m[0].length, m.index + m[0].length + 5);
+        const before = v.slice(Math.max(0, m.index - 5), m.index);
+        return { value: parsePrice(m[0].replace(/\s/g, '')), withCur: /^\s?([€$£]|eur|usd|chf)/i.test(after) || /([€$£]|eur|usd|chf)\s?$/i.test(before) };
+      })
+      .filter((x) => x.value);
+    const cur = all.filter((x) => x.withCur);
+    const nums = (cur.length ? cur : all).map((x) => x.value);
     return nums.length ? Math.min(...nums) : null;
   }
 
@@ -825,10 +876,17 @@ window.WLUtil = WLUtil;
     const h1 = text(doc.querySelector('h1'));
     let price = null;
     let currency = null;
-    for (const el of doc.querySelectorAll(
-      '[itemprop=price], [data-price], .price, .product-price, .product__price, [class*="price" i], [id*="price" i]',
-    )) {
+    const exact = [...doc.querySelectorAll('[data-price-amount], [itemprop=price][content], [class*="price" i][content]')];
+    const loose = [...doc.querySelectorAll('[data-price], .price, .product-price, .product__price, [class*="price" i], [id*="price" i]')];
+    for (const el of [...exact, ...loose]) {
       if (isOldPrice(el)) continue;
+      if (/old|regular|rrp|list/i.test(el.getAttribute('data-price-type') || '')) continue;
+      const machine = el.getAttribute('data-price-amount');
+      if (machine && parsePrice(machine)) {
+        price = parsePrice(machine);
+        currency = currencyOf(text(el));
+        break;
+      }
       let v = el.getAttribute('content') || el.getAttribute('data-price');
       if (!v) {
         const copy = el.cloneNode(true);
@@ -891,7 +949,7 @@ window.WLUtil = WLUtil;
     // Block-Elemente mit " | " trennen, damit Sätze nicht zusammenkleben
     body.querySelectorAll('p, div, li, h1, h2, h3, h4, span, br, td').forEach((n) => n.append(' | '));
     const t = body.textContent.replace(/\s+/g, ' ');
-    const num = '\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{2})?';
+    const num = '\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,](?:\\d{2}|[-–]))?';
     const sym = '€|EUR|US\\$|USD|\\$|£|GBP|CHF';
     const re = new RegExp(`(?:(${sym})\\s?(${num}))|(?:(${num})\\s?(${sym}))`, 'g');
     const h1 = text(doc.querySelector('h1'));
@@ -900,7 +958,7 @@ window.WLUtil = WLUtil;
       .filter((m) => {
         // nur der eigene Satz vor dem Betrag zählt ("Versand ab 90 €")
         const before = t.slice(Math.max(0, m.index - 45), m.index);
-        return !PROMO.test(before.split(/[|!?•]|\.\s/).pop());
+        return !PROMO.test(before.split(/[|!?•]|\.\s/).pop()) && !isUnitPrice(t, m.index, m[0].length);
       })
       .map((m) => ({
       at: m.index,
@@ -1004,7 +1062,7 @@ window.WLUtil = WLUtil;
     const vid = u.searchParams.get('variant');
     const v =
       (vid && p.variants.find((x) => String(x.id) === vid)) ||
-      pickBest(p.variants, (x) => [x.title, x.sku, x.option1, x.option2, x.option3].filter(Boolean).join(' '), u) ||
+      pickBest(p.variants, (x) => [x.title, x.option1, x.option2, x.option3].filter(Boolean).join(' '), u) ||
       p.variants.find((x) => x.available) ||
       p.variants[0];
     const opts = (p.options || []).map((o) => (typeof o === 'string' ? o : o.name));
@@ -1058,6 +1116,11 @@ window.WLUtil = WLUtil;
     return out;
   }
 
+  // Produktname laut Seite (Überschrift / Titel), um das Hauptprodukt zu erkennen
+  function pageName(doc) {
+    return `${text(doc.querySelector('h1'))} ${meta(doc, 'og:title') || ''} ${text(doc.querySelector('title'))}`;
+  }
+
   function fromJsonLd(doc, u) {
     const products = jsonLd(doc).filter((n) => [].concat(n['@type'] || []).includes('Product'));
     if (!products.length) return {};
@@ -1067,6 +1130,8 @@ window.WLUtil = WLUtil;
       products.find(bySku) ||
       (products.length > 1 &&
         pickBest(products, (x) => [x.name, x.color, x.size, x.sku, x.url].filter(Boolean).join(' '), u)) ||
+      (products.length > 1 &&
+        products.find((x) => x.name && normalizeWord(pageName(doc)).includes(normalizeWord(x.name)))) ||
       products[0];
     const offerPrice = (x) => parsePrice(x.price ?? x.lowPrice ?? [].concat(x.priceSpecification || [])[0]?.price);
     const offers = [].concat(p.offers || []).flatMap((o) => (o.offers ? [].concat(o.offers) : [o])).filter(offerPrice);
@@ -1163,7 +1228,8 @@ window.WLUtil = WLUtil;
     save(load().filter((i) => i.id !== id));
   }
 
-  window.Wishlist = { all, add, refresh, remove, setPrice };
+  // inspect: Produkt nur auslesen, ohne es zu speichern (für test.html)
+  window.Wishlist = { all, add, refresh, remove, setPrice, inspect: resolve };
 })();
 
 'use strict';
@@ -1315,11 +1381,14 @@ $('#add').addEventListener('submit', (e) => {
 });
 $('#refresh').addEventListener('click', refreshAll);
 
-items = W.all();
-render();
-// Beim Öffnen der Seite: aktuellen Preis aller Produkte neu laden
-if (items.length) refreshAll();
-else status('bereit. füg oben einen produktlink ein.');
+// Eingebettet in test.html (?embed): nichts laden, nichts aktualisieren
+if (!new URLSearchParams(location.search).has('embed')) {
+  items = W.all();
+  render();
+  // Beim Öffnen der Seite: aktuellen Preis aller Produkte neu laden
+  if (items.length) refreshAll();
+  else status('bereit. füg oben einen produktlink ein.');
+}
 
   </script>
 </body>

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Preis-Test</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #000; --panel: #0b0b0b; --line: #262626; --text: #e6e6e6; --dim: #7a7a7a; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 'JetBrains Mono', ui-monospace, monospace; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p { margin: 0 0 12px; color: var(--dim); }
+    button { background: none; border: 0; color: #fff; font: inherit; cursor: pointer; padding: 0; }
+    button:disabled { color: var(--dim); cursor: wait; }
+    textarea { width: 100%; min-height: 110px; background: #000; color: var(--text); border: 1px solid var(--line); font: 12px/1.5 inherit; font-family: inherit; padding: 8px; }
+    .bar { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; margin: 10px 0 14px; }
+    .sum { color: #fff; }
+    .wrap { overflow-x: auto; border: 1px solid var(--line); }
+    table { border-collapse: collapse; width: 100%; min-width: 900px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--dim); font-weight: 400; position: sticky; top: 0; background: var(--panel); }
+    td.price { font-weight: 800; white-space: nowrap; }
+    td img { width: 56px; height: 42px; object-fit: contain; background: #fff; }
+    .warn { color: #fff; text-decoration: underline dotted; }
+    .dim { color: var(--dim); }
+    a { color: var(--text); }
+  </style>
+</head>
+<body>
+  <h1>&gt; preis-erkennung testen</h1>
+  <p>ruft echte produktseiten über den worker ab und zeigt, was erkannt wird. speichert nichts in deiner wunschliste.</p>
+
+  <textarea id="urls" spellcheck="false"></textarea>
+  <div class="bar">
+    <button id="run">[ ▶ test starten ]</button>
+    <button id="copy">[ ergebnis kopieren ]</button>
+    <span class="sum" id="sum"></span>
+  </div>
+
+  <div class="wrap">
+    <table>
+      <thead><tr><th>#</th><th>bild</th><th>shop</th><th>name</th><th>preis €</th><th>original</th><th>quelle</th><th>zeit</th><th>hinweis</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <!-- dieselbe Erkennung wie die Wunschliste, ohne zu speichern -->
+  <iframe id="engine" src="./?embed=1" hidden></iframe>
+
+  <script>
+    'use strict';
+    const URLS = [
+      // MediaMarkt (DE/CH)
+      'https://www.mediamarkt.de/de/product/_logitech-g-pro-x-superlight-2-lightspeed-maus-weiss-2888355.html',
+      'https://www.mediamarkt.de/de/product/_logitech-g-pro-x-superlight-2-lightspeed-maus-schwarz-2888354.html',
+      'https://www.mediamarkt.de/de/product/_logitech-pro-x-superlight-2-lightspeed-kabellose-gaming-maus-magenta-2906784.html',
+      'https://www.mediamarkt.ch/de/product/_logitech-pro-x-superlight-2-2198148.html',
+      // Caseking
+      'https://www.caseking.de/logitech-g-pro-x-superlight-2-gaming-maus-schwarz/GAMO-1167.html',
+      // Amazon
+      'https://www.amazon.de/Logitech-Gaming-Maus-Hybrid-Schalter-programmierbare-USB-C-Ladung/dp/B07W6JNYXV',
+      'https://www.amazon.com/Razer-DeathAdder-Wireless-Gaming-Mouse/dp/B0B6XZLNHQ',
+      // Hersteller-Shops
+      'https://www.razer.com/gaming-mice/Razer-DeathAdder-V3-Pro/RZ01-04630100-R3U1',
+      'https://www.razer.com/gaming-mice/Razer-DeathAdder-V3-Pro/RZ01-04630200-R3U1',
+      'https://lamzu.com/products/lamzu-maya-x',
+      'https://www.pulsar.gg/products/x2v2-gaming-mouse',
+      'https://us.pulsar.gg/products/x2-v3-gaming-mouse',
+      'https://www.gloriousgaming.com/products/model-o-2-wireless-mouse',
+      'https://wooting.io/wooting-60he',
+      'https://steelseries.com/gaming-headsets/arctis-nova-pro?color=black&connectivityType=wired&primaryPlatform=pc',
+      'https://hyperx.com/products/hyperx-cloud-iii-wired-gaming-headset',
+      'https://endgamegear.com/products/op1-8k-v2-wired-gaming-mouse',
+      'https://fnatic.com/products/maya-lamzu-x-fnatic-gaming-mouse',
+      'https://de.tecknet.com/products/extra-large-mouse-pad-black',
+      // Mauspads / Zubehör
+      'https://www.rxd.shop/products/RXD-Mauspad-Black-900x400x3mm?img=0',
+      'https://www.strayfe.de/products/strayfe-Mauspad-RxD-Galaxy-Blue-900x400x3mm',
+      'https://izukistudios.com/products/koi-card-holder-black',
+      'https://jpgamingusa.com/products/artisan-fx-zero-mousepad',
+      'https://www.respawngt.com/products/artisan-ninja-fx-zero-gaming-mousepad',
+      'https://shop.x-raypad.com/shop/aqua-control-plus-black-galaxy-gaming-mouse-pads/',
+      'https://us.x-raypad.com/product/x-raypad-aqua-control-ii-gaming-mouse-pads/',
+      'https://ausmodshop.com/products/x-raypad-aqua-control-plus-black',
+      'https://www.propads.gg/en/products/custom-mousepad-xxl-900x400mm',
+      // Händler
+      'https://us.maxgaming.com/us/wireless-mouses/lamzu-maya-x-black',
+      'https://us.maxgaming.com/us/wireless-mouses/lamzu-atlantis-mini-champion-edition-panda-white',
+      'https://www.microcenter.com/product/692186/lamzu-maya-x-wireless-gaming-mouse-white',
+      'https://mechanicalkeyboards.com/products/wooting-60he',
+      'https://www.bestbuy.com/site/steelseries-arctis-nova-pro-wireless-multi-gaming-headset-for-pc-ps5-ps4-switch-black/6506219.p?skuId=6506219',
+      'https://www.hp.com/us-en/shop/pdp/hyperx-cloud-iii-gaming-headset-(black)',
+    ];
+
+    const $ = (s) => document.querySelector(s);
+    const eur = (n) => (n == null ? '—' : new Intl.NumberFormat('de-AT', { style: 'currency', currency: 'EUR' }).format(n));
+    const results = [];
+    $('#urls').value = URLS.join('\n');
+
+    function engine() {
+      return new Promise((resolve) => {
+        const f = $('#engine');
+        const ready = () => f.contentWindow?.Wishlist?.inspect;
+        if (ready()) return resolve(f.contentWindow.Wishlist);
+        const t = setInterval(() => {
+          if (ready()) {
+            clearInterval(t);
+            resolve(f.contentWindow.Wishlist);
+          }
+        }, 100);
+      });
+    }
+
+    function hints(r) {
+      const h = [];
+      if (r.error) h.push(r.error);
+      if (r.price == null) h.push('KEIN PREIS');
+      else if (r.price < 1 || r.price > 5000) h.push('preis unplausibel?');
+      if (!r.image) h.push('kein bild');
+      if (!r.title) h.push('kein name');
+      return h.join(' · ');
+    }
+
+    function row(i, url, r, ms) {
+      const tr = document.createElement('tr');
+      const shop = new URL(url).hostname.replace(/^www\./, '');
+      const orig =
+        r.currency && r.currency !== 'EUR' && r.originalPrice != null
+          ? new Intl.NumberFormat('de-AT', { style: 'currency', currency: r.currency }).format(r.originalPrice)
+          : '';
+      const cells = [
+        String(i + 1),
+        '',
+        shop,
+        '',
+        eur(r.price),
+        orig,
+        r.priceSource || '',
+        `${(ms / 1000).toFixed(1)}s`,
+        hints(r),
+      ];
+      cells.forEach((c, j) => {
+        const td = document.createElement('td');
+        if (j === 1 && r.image) {
+          const img = document.createElement('img');
+          img.src = r.image;
+          img.loading = 'lazy';
+          td.append(img);
+        } else if (j === 3) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = (r.title || url).slice(0, 70);
+          td.append(a);
+        } else td.textContent = c;
+        if (j === 4) td.className = 'price';
+        if (j === 8 && c) td.className = 'warn';
+        if (j === 6 || j === 7) td.classList.add('dim');
+        tr.append(td);
+      });
+      return tr;
+    }
+
+    function summary() {
+      const n = results.length;
+      const priced = results.filter((r) => r.r.price != null).length;
+      const img = results.filter((r) => r.r.image).length;
+      $('#sum').textContent = n ? `${n} getestet · preis ${priced}/${n} · bild ${img}/${n}` : '';
+    }
+
+    async function run() {
+      const urls = $('#urls').value.split(/\s+/).map((x) => x.trim()).filter((x) => /^https?:\/\//.test(x));
+      const W = await engine();
+      const tbody = $('#rows');
+      tbody.replaceChildren();
+      results.length = 0;
+      $('#run').disabled = true;
+      let next = 0;
+      const worker = async () => {
+        while (next < urls.length) {
+          const i = next++;
+          const url = urls[i];
+          const t0 = performance.now();
+          let r;
+          try {
+            r = await W.inspect(url);
+          } catch (e) {
+            r = { error: e.message };
+          }
+          const ms = performance.now() - t0;
+          results.push({ i, url, r, ms });
+          // in Reihenfolge einsortieren
+          const tr = row(i, url, r, ms);
+          tr.dataset.i = i;
+          const after = [...tbody.children].find((x) => Number(x.dataset.i) > i);
+          tbody.insertBefore(tr, after || null);
+          summary();
+        }
+      };
+      await Promise.all(Array.from({ length: 4 }, worker));
+      $('#run').disabled = false;
+    }
+
+    $('#run').onclick = run;
+    $('#copy').onclick = async () => {
+      const lines = results
+        .sort((a, b) => a.i - b.i)
+        .map(({ i, url, r }) =>
+          [i + 1, url, r.title || '-', r.price ?? '-', r.currency || '', r.originalPrice ?? '', r.priceSource || '', hints(r)].join(' | '),
+        );
+      const txt = `${$('#sum').textContent}\n${lines.join('\n')}`;
+      try {
+        await navigator.clipboard.writeText(txt);
+        $('#copy').textContent = '[ kopiert ✓ ]';
+      } catch {
+        prompt('kopieren:', txt);
+      }
+      setTimeout(() => ($('#copy').textContent = '[ ergebnis kopieren ]'), 2000);
+    };
+  </script>
+</body>
+</html>
