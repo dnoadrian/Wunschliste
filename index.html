@@ -1917,7 +1917,7 @@ $('#login-form').addEventListener('submit', (e) => {
   signIn();
 });
 $('#logout').addEventListener('click', async () => {
-  if (!(await ask({ title: 'logout', text: 'abmelden?', ok: 'abmelden' }))) return;
+  if (!(await ask({ title: 'logout', text: 'wirklich abmelden?', ok: 'abmelden', danger: true }))) return;
   gen++;
   await A.signOut();
   showLogin('abgemeldet');
