@@ -146,7 +146,6 @@ body.locked #app, body.locked .total { display: none; }
 .statusline[data-state="ok"] { color: var(--text); }
 .statusline[data-state="err"] { color: #fff; font-weight: 600; }
 .statusline[data-state="busy"] { color: var(--text); }
-.titlebar__status[data-state="busy"] { color: var(--warn); }
 
 button {
   background: transparent; border: 0; cursor: pointer; padding: 0;
@@ -269,9 +268,8 @@ select {
   <main class="window">
     <header class="titlebar">
       <span class="dots"><i></i><i></i><i></i></span>
-      <span class="titlebar__path"><span id="whoami">user</span>@wunschliste: ~</span>
+      <span class="titlebar__path">User: <span id="whoami">–</span></span>
       <button type="button" class="titlebar__logout" id="logout" hidden>[ logout ]</button>
-      <span class="titlebar__status" id="status">● bereit</span>
     </header>
 
     <pre class="banner" aria-label="WUNSCHLISTE">
@@ -1650,8 +1648,6 @@ function status(text, state = '') {
   const el = $('#statusline');
   el.textContent = text;
   el.dataset.state = state;
-  $('#status').textContent = state === 'busy' ? '● lädt' : '● bereit';
-  $('#status').dataset.state = state;
 }
 
 function render() {
@@ -1659,7 +1655,9 @@ function render() {
   const tpl = $('#card');
   grid.replaceChildren();
 
-  items.forEach((item, i) => {
+  // Standard-Sortierung: nach Preis, günstigstes zuerst, ohne Preis ans Ende
+  const sorted = [...items].sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+  sorted.forEach((item, i) => {
     const el = tpl.content.firstElementChild.cloneNode(true);
     el.classList.toggle('loading', busy.has(item.id));
 
@@ -1833,7 +1831,7 @@ function showLogin(msg) {
   document.body.classList.add('locked');
   $('#login').hidden = false;
   $('#logout').hidden = true;
-  $('#whoami').textContent = 'user';
+  $('#whoami').textContent = '–';
   loginStatus(msg || 'benutzer und passwort eingeben');
   setTimeout(() => $('#login-user').focus(), 50);
 }
@@ -1844,7 +1842,7 @@ function startApp() {
   $('#login').hidden = true;
   const user = A.user();
   $('#logout').hidden = !user;
-  $('#whoami').textContent = user ? user.toLowerCase() : 'user';
+  $('#whoami').textContent = user || '–';
   gen++;
   busy.clear();
   items = W.all();
