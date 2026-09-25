@@ -309,7 +309,7 @@ select {
         <p class="card__meta"></p>
         <div class="card__actions">
           <a class="card__src" target="_blank" rel="noopener">[ zum produkt ]</a>
-          <button type="button" class="card__set">[ preis eingeben ]</button>
+          <button type="button" class="card__set" title="preis selbst festlegen">[ ✎ preis ]</button>
           <button type="button" class="card__rm">[ entfernen ]</button>
         </div>
       </div>
@@ -1306,7 +1306,8 @@ window.WLUtil = WLUtil;
   async function add(url) {
     if (!/^https?:\/\//i.test(url || '')) throw new Error('gültiger link (http/https) benötigt');
     const lid = activeId;
-    const item = { id: Math.random().toString(36).slice(2, 10), ...(await resolve(url.trim())), sourceUrl: url.trim() };
+    const found = await resolve(url.trim());
+    const item = { id: Math.random().toString(36).slice(2, 10), ...found, detectedPrice: found.price, sourceUrl: url.trim() };
     const items = load(lid);
     items.push(item);
     save(items, lid);
@@ -1320,12 +1321,13 @@ window.WLUtil = WLUtil;
     let patch;
     try {
       patch = await resolve(item.sourceUrl || item.url);
-      // bekannte werte behalten, wenn der shop diesmal nichts liefert
-      if (patch.price == null && item.manualPrice != null) {
+      // erkannten Shop-Preis immer merken (zum Vergleich, falls der Preis manuell gesetzt ist)
+      patch.detectedPrice = patch.price ?? item.detectedPrice ?? null;
+      if (item.manualPrice != null) {
+        // selbst gesetzter Preis gilt, bis er zurückgesetzt wird
         patch.price = item.manualPrice;
         patch.error = null;
-      } else if (patch.price == null) patch.price = item.price;
-      else patch.manualPrice = null; // shop liefert wieder einen preis
+      } else if (patch.price == null) patch.price = item.price; // bekannten Preis behalten
       if (!patch.image) patch.image = item.image;
     } catch (e) {
       patch = { error: e.message, checkedAt: new Date().toISOString() };
@@ -1338,11 +1340,18 @@ window.WLUtil = WLUtil;
     return cur;
   }
 
+  // eur = Zahl: Preis selbst festlegen · eur = null: wieder den erkannten Shop-Preis nehmen
   function setPrice(id, eur) {
     const items = load();
     const cur = items.find((i) => i.id === id);
     if (!cur) throw new Error('nicht gefunden');
-    Object.assign(cur, { price: eur, manualPrice: eur, originalPrice: eur, currency: 'EUR', error: null });
+    if (eur == null) {
+      Object.assign(cur, { manualPrice: null, price: cur.detectedPrice ?? null });
+      if (cur.price == null) cur.error = 'kein preis gefunden';
+    } else {
+      if (cur.manualPrice == null && cur.detectedPrice === undefined) cur.detectedPrice = cur.price ?? null;
+      Object.assign(cur, { price: eur, manualPrice: eur, error: null });
+    }
     save(items);
     return cur;
   }
@@ -1495,15 +1504,20 @@ function render() {
       const orig = new Intl.NumberFormat('de-AT', { style: 'currency', currency: item.currency }).format(item.originalPrice);
       shopEl.textContent += ` · original ${orig}${item.rateApprox ? ' (kurs ca.)' : ''}`;
     }
-    if (item.manualPrice != null) shopEl.textContent += ' · preis manuell';
+    if (item.manualPrice != null) {
+      shopEl.textContent += ' · preis selbst gesetzt';
+      if (item.detectedPrice != null && Math.abs(item.detectedPrice - item.manualPrice) > 0.005) {
+        shopEl.textContent += ` (shop-erkennung: ${eur(item.detectedPrice)})`;
+      }
+    }
 
     const err = $('.card__meta', el);
     if (item.error) err.textContent = item.error;
     else err.remove();
 
     const setBtn = $('.card__set', el);
-    if (item.price == null || item.manualPrice != null) setBtn.onclick = () => enterPrice(item);
-    else setBtn.remove();
+    setBtn.onclick = () => enterPrice(item);
+    if (item.price == null) setBtn.textContent = '[ ✎ preis eingeben ]';
 
     $('.card__src', el).href = item.url;
     $('.card__rm', el).onclick = () => removeItem(item);
@@ -1578,8 +1592,16 @@ async function refreshAll() {
 }
 
 function enterPrice(item) {
-  const input = prompt(`Preis in Euro für "${item.title}":`, item.price != null ? String(item.price).replace('.', ',') : '');
+  const hint = item.manualPrice != null ? '\n(leer lassen = wieder automatisch erkennen)' : '';
+  const input = prompt(`Preis in Euro für "${item.title}":${hint}`, item.price != null ? item.price.toFixed(2).replace('.', ',') : '');
   if (input == null) return;
+  if (!input.trim()) {
+    if (item.manualPrice == null) return;
+    const fresh = W.setPrice(item.id, null);
+    items[items.findIndex((x) => x.id === item.id)] = fresh;
+    render();
+    return status(`${item.title}: preis wieder automatisch → ${eur(fresh.price)}`, 'ok');
+  }
   const value = parseFloat(input.replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3})/g, '').replace(',', '.'));
   if (!Number.isFinite(value) || value <= 0) return status('ungültiger preis', 'err');
   const fresh = W.setPrice(item.id, Math.round(value * 100) / 100);
