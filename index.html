@@ -41,7 +41,17 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   [hidden] { display: none !important; }
 
-  html { -webkit-tap-highlight-color: transparent; overscroll-behavior-y: none; }
+  html { -webkit-tap-highlight-color: transparent; }
+  /* nur in der installierten App: kein Gummiband (dort gibt es eigenes Runterziehen zum Neuladen) */
+  @media (display-mode: standalone) { html { overscroll-behavior-y: none; } }
+  .ptr {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 70; height: 0; overflow: hidden;
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 8px;
+    background: var(--bg); border-bottom: 2px solid var(--border2);
+    font-size: 7px; color: var(--text-muted); transition: height .15s;
+  }
+  .ptr[data-ready="1"] { color: var(--green); border-bottom-color: var(--green); }
+  .ptr[hidden] { display: flex !important; }
   body {
     background: var(--bg);
     color: var(--text);
@@ -2111,6 +2121,43 @@ $('#install').addEventListener('click', async () => {
   await ask({ title: 'app installieren', text: `so installierst du wishly:\n\n${installSteps()}`, ok: 'verstanden', cancel: false });
 });
 updateInstallButton();
+
+// Installierte App: Runterziehen zum Neuladen (Android bietet das in Apps nicht von selbst)
+if (runningAsApp()) {
+  const bar = document.createElement('div');
+  bar.className = 'ptr';
+  document.body.prepend(bar);
+  const NEED = 130;
+  let startY = null;
+  let pulled = 0;
+  addEventListener(
+    'touchstart',
+    (e) => {
+      startY = scrollY <= 0 && $('#modal').hidden && e.touches.length === 1 ? e.touches[0].clientY : null;
+      pulled = 0;
+    },
+    { passive: true },
+  );
+  addEventListener(
+    'touchmove',
+    (e) => {
+      if (startY == null) return;
+      pulled = e.touches[0].clientY - startY;
+      if (pulled <= 0) return void (bar.style.height = '0');
+      bar.style.height = `${Math.min(pulled / 2, 70)}px`;
+      bar.dataset.ready = pulled > NEED ? '1' : '';
+      bar.textContent = pulled > NEED ? 'LOSLASSEN ZUM NEU LADEN' : '↓ ZIEHEN ZUM NEU LADEN';
+    },
+    { passive: true },
+  );
+  addEventListener('touchend', () => {
+    if (startY != null && pulled > NEED) {
+      bar.textContent = 'LADE NEU …';
+      location.reload();
+    } else bar.style.height = '0';
+    startY = null;
+  });
+}
 
 // In der installierten App gibt es kein "Neu laden": kommt sie nach 30 Min. wieder in den Vordergrund, zählt das wie Öffnen
 let hiddenAt = 0;
