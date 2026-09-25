@@ -1,6 +1,6 @@
 {
   // "name" muss genau so heißen wie dein Worker in Cloudflare
-  "name": "w",
+  "name": "wishly",
   "main": "worker.js",
   "compatibility_date": "2025-09-01",
   "assets": {

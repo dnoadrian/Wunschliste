@@ -35,7 +35,7 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 
 ## Adressen
 
-- `https://<worker>.workers.dev/` (Standard)
+- `https://wishly.adri-cb7.workers.dev/` (Standard, Worker heißt `wishly`)
 - `https://dnoadrian.at/wishly/` – über eine Worker-Route `dnoadrian.at/wishly*` (Domain muss in Cloudflare sein).
   Die Seite verwendet nur relative Pfade und funktioniert deshalb unter beiden Adressen.
 
