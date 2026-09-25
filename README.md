@@ -16,7 +16,8 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
   Unbekannter Name = neues Konto
 - **Preis eingeben**, wenn keiner oder nur ein unsicherer gefunden wurde
 - Sortiert nach Preis (teuerstes zuerst), Gesamtpreis der Liste oben
-- Als App auf den Startbildschirm legbar
+- **Als App installierbar** (Android/Chrome: Knopf „APP INSTALLIEREN“ oder Menü ⋮ → „App installieren“):
+  eigenes Icon, Vollbild, startet auch ohne Netz, erscheint im **Teilen-Menü** anderer Apps
 
 ## Aufbau
 
@@ -28,6 +29,7 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 | `.assetsignore` | Dateien, die nicht öffentlich ausgeliefert werden |
 | `test.html` | Testseite: prüft viele echte Produktlinks und zeigt, was erkannt wird |
 | `favicon.svg`, `*.png`, `manifest.webmanifest` | Icons und App-Einstellungen |
+| `sw.js` | Service Worker: App-Start ohne Netz (Preise und Konten werden nie zwischengespeichert) |
 
 ## Veröffentlichen (Cloudflare)
 

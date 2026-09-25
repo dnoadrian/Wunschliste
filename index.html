@@ -250,6 +250,7 @@
 
   <header>
     <h1><span>WUNSCH</span>LISTE</h1>
+    <p class="userline" id="install-line" hidden><button type="button" class="btn btn--green btn--small" id="install">&#8681; APP INSTALLIEREN</button></p>
     <p class="userline" id="userline" hidden>USER: <b id="whoami">&ndash;</b> <button type="button" class="btn btn--red btn--small" id="logout">LOGOUT</button></p>
   </header>
 
@@ -582,7 +583,8 @@ window.WLUtil = WLUtil;
       const res = await fetch('/api/ping', { signal: AbortSignal.timeout(5000) });
       online = res.ok && (await res.json()).ok === true;
     } catch {
-      online = false;
+      // kein Netz (z.B. App offline gestartet): mit Sitzung trotzdem die eigenen Listen aus dem Zwischenspeicher zeigen
+      online = !!session;
     }
     if (online && session) openStore(userKeys(session.user));
     return { online, user: session?.user || null };
@@ -1945,8 +1947,10 @@ function startApp() {
   renderLists();
   render();
   // Nur beim Öffnen der Seite (bzw. Anmelden): Preise ALLER Listen neu laden
-  if (W.lists().some((l) => l.count)) refreshAll(true);
+  if (!navigator.onLine) status('offline – preise werden beim nächsten öffnen mit internet aktualisiert');
+  else if (W.lists().some((l) => l.count)) refreshAll(true);
   else status('bereit. füg oben einen produktlink ein.');
+  takeShare();
 }
 
 async function signIn() {
@@ -1981,6 +1985,45 @@ A.onSessionLost(() => {
   refreshing = null;
   showLogin('sitzung abgelaufen – bitte neu anmelden');
 });
+
+/* ------------------------------------------------------------ App */
+
+// Aus dem "Teilen"-Menü einer anderen App: /?url=…&text=…&title=… -> Link automatisch hinzufügen
+const shareParams = new URLSearchParams(location.search);
+let pendingShare = ['url', 'text', 'title'].map((k) => shareParams.get(k) || '').join(' ').trim() || null;
+if (pendingShare) history.replaceState(null, '', location.pathname);
+
+function takeShare() {
+  if (!pendingShare) return;
+  $('#url').value = pendingShare;
+  pendingShare = null;
+  $('#add').requestSubmit();
+}
+
+// App installieren (Android/Chrome/Edge): eigener Knopf statt Browser-Menü
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $('#install-line').hidden = false;
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  $('#install-line').hidden = true;
+  status('app installiert – du findest sie jetzt bei deinen apps', 'ok');
+});
+$('#install').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  $('#install-line').hidden = true;
+});
+
+// Service Worker: App startet schnell und auch kurz ohne Netz
+if ('serviceWorker' in navigator && !shareParams.has('embed') && window.isSecureContext) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 
 // Eingebettet in test.html (?embed): nichts laden, nichts aktualisieren
 if (!new URLSearchParams(location.search).has('embed')) {
