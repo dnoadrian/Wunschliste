@@ -41,7 +41,7 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 
 ## Veröffentlichen (Cloudflare)
 
-Der Worker `wishly` ist mit diesem Repo verbunden (Settings → Build): jeder Push auf `main` wird automatisch gebaut und veröffentlicht.
+Der Worker `wishly` ist mit diesem Repo (`dnoadrian/wishly`) verbunden (Settings → Build): jeder Push auf `main` wird automatisch gebaut und veröffentlicht.
 Der Speicher für die Konten (Durable Object `Account`) wird dabei automatisch angelegt.
 
 Wichtig: `"name"` in `wrangler.jsonc` muss zum Namen des Workers in Cloudflare passen.
