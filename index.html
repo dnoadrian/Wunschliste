@@ -528,13 +528,14 @@ window.WLUtil = WLUtil;
       }),
       fromEmbeddedJson(doc, u),
       fromDom(doc),
-      fromJsonRegex(html),
+      fromJsonRegex(html, u),
       fromText(doc),
     ];
     // Liefert eine genaue Quelle schon einen Euro-Preis (z.B. Shop-Preis für Österreich),
     // hat der Vorrang vor Umrechnen: Shops runden und rechnen mit eigenem Kurs
     // Nur wenn die genaueste Quelle eine bekannte Fremdwährung hat (sonst ginge z.B. der Variantenpreis verloren)
     const first = sources.find((x) => x.price != null);
+    const SOURCE_NAMES = ['shopify', 'amazon', 'json-ld', 'microdata', 'meta-tags', 'seiten-daten', 'preisfeld', 'seiten-code', 'seitentext'];
     const eurSource =
       first && first.currency && first.currency !== 'EUR'
         ? sources.slice(0, 5).find((x) => x.price != null && x.currency === 'EUR')
@@ -542,6 +543,7 @@ window.WLUtil = WLUtil;
     if (eurSource) {
       p.price = eurSource.price;
       p.currency = 'EUR';
+      p.priceSource = SOURCE_NAMES[sources.indexOf(eurSource)];
     }
     for (const src of sources) {
       const { price, currency, ...rest } = src;
@@ -549,6 +551,7 @@ window.WLUtil = WLUtil;
       if (p.price == null && price != null) {
         p.price = price;
         p.currency = currency || null;
+        p.priceSource = SOURCE_NAMES[sources.indexOf(src)];
       }
       p = { ...rest, ...p };
     }
@@ -565,6 +568,7 @@ window.WLUtil = WLUtil;
       image: abs(p.image, url),
       price: p.price ?? null,
       currency: p.currency || 'EUR',
+      priceSource: p.priceSource || null,
       gtin: p.gtin || null,
       mpn: p.mpn || null,
       shop: u.hostname.replace(/^www\./, ''),
@@ -609,7 +613,10 @@ window.WLUtil = WLUtil;
     });
 
     const slug = normalizeSlug(u);
+    const toks = urlTokens(u);
+    const urlColors = colorKeys(colorFromUrl(u.href) || '');
     let best = null;
+    let named = null;
     for (const b of blobs) {
       let data;
       try {
@@ -620,18 +627,48 @@ window.WLUtil = WLUtil;
       walkJson(data, (o) => {
         const title = typeof o.name === 'string' ? o.name : typeof o.title === 'string' ? o.title : null;
         if (!title || title.length < 3) return;
-        const price = jsonPrice(o);
+        // hat das Produkt Varianten, zählt die zum Link passende (nicht der "ab"-Preis)
+        const variant = Array.isArray(o.variants) && o.variants.length ? pickBest(o.variants, variantText, u) : null;
+        const price = (variant && jsonPrice(variant)) ?? jsonPrice(o);
         if (price == null) return;
-        const image = jsonImage(o);
-        // passt der Name zum Link? Dann ist es sehr wahrscheinlich das richtige Produkt
+        const image = jsonImage(variant || {}) || jsonImage(o);
+        // passt der Name (inkl. Größe/Farbe) zum Link? Dann ist es sehr wahrscheinlich das richtige Produkt
         const overlap = slugOverlap(slug, title);
-        const score = overlap * 3 + (image ? 1 : 0) + (o.sku || o.id ? 0.5 : 0);
-        if (!best || score > best.score) best = { score, title, price, image, brand: jsonBrand(o), currency: jsonCurrency(o) };
+        const own = `${title} ${variantText(o)}`;
+        const score =
+          overlap * 3 + matchScore(own, toks, urlColors) + sizeConflict(own, toks) + (image ? 1 : 0) + (variant ? 1 : 0);
+        if (!best || score > best.score)
+          best = { score, overlap, title, price, image, brand: jsonBrand(o), currency: jsonCurrency(variant || {}) || jsonCurrency(o) };
+        // Produktname + Bild vom Eintrag, der am besten zum Link-Namen passt (nicht vom Varianten-Eintrag)
+        const nameScore = overlap * 3 + (image ? 1 : 0) + (variant ? 1 : 0);
+        if (!named || nameScore > named.nameScore) named = { nameScore, overlap, title, image };
       });
     }
-    return best
-      ? strip({ title: best.title, price: best.price, currency: best.currency, image: best.image, brand: best.brand })
-      : {};
+    if (!best || best.score <= 0) return {};
+    return strip({
+      // Name nur übernehmen, wenn er zum Link passt (sonst ist es evtl. nur ein Variantenname)
+      title: named && named.overlap >= 0.3 ? named.title : null,
+      price: best.price,
+      currency: best.currency,
+      image: best.image || named?.image,
+      brand: best.brand,
+    });
+  }
+
+  function variantText(v) {
+    if (!v || typeof v !== 'object') return '';
+    const opts = Array.isArray(v.options) ? v.options.map((x) => (typeof x === 'object' ? x.value || x.name : x)) : [];
+    return [v.title, v.name, v.sku, v.size, v.color, v.option1, v.option2, v.option3, ...opts]
+      .filter((x) => typeof x === 'string' || typeof x === 'number')
+      .join(' ');
+  }
+
+  // Kandidat nennt eine andere Größe als der Link (z.B. 1200x600 statt 900x400) -> Abzug
+  function sizeConflict(candidate, toks) {
+    const sizes = (normSize(candidate).match(/\d+x\d+(?:x\d+)?(?:mm)?/g) || []);
+    const want = toks.filter((t) => /\d+x\d+/.test(t));
+    if (!sizes.length || !want.length) return 0;
+    return sizes.some((sz) => want.some((w) => w.startsWith(sz) || sz.startsWith(w))) ? 0 : -6;
   }
 
   function walkJson(root, visit) {
@@ -757,6 +794,10 @@ window.WLUtil = WLUtil;
     return t.length > 2 && !/^\d+$/.test(t) ? t : null;
   }
 
+  // Beträge in Werbetexten: "Kostenloser Versand ab 90 €", "Spare 10 €", "ab 3 Stück" …
+  const PROMO =
+    /versand|shipping|lieferung|delivery|gratis|kostenlos|spare|sparen|\bsave\b|rabatt|discount|gutschein|coupon|mindest|bestellwert|warenkorb|ratenzahlung|monatlich|per month|\bab\s*$|\bfrom\s*$|über\s*$|over\s*$|bis zu|up to/i;
+
   // Alte / durchgestrichene Preise (UVP, "statt", compare-at) erkennen
   const OLD_PRICE =
     /\bold|old-|-old|compare|\bwas\b|was-price|uvp|strike|rrp|msrp|crossed|statt|former|previous/i;
@@ -795,6 +836,8 @@ window.WLUtil = WLUtil;
         v = text(copy);
       }
       v = v.slice(0, 200);
+      // nur Text VOR dem Betrag prüfen ("Versand ab 90 €"), nicht "39,90 € zzgl. Versand"
+      if (PROMO.test(v.slice(0, v.search(/\d/)))) continue;
       if (/\d/.test(v) && /[€$£]|eur|usd|chf|\d[.,]\d{2}/i.test(v)) {
         price = lowestAmount(v);
         currency = currencyOf(v);
@@ -813,16 +856,30 @@ window.WLUtil = WLUtil;
   }
 
   // Preis irgendwo als JSON im HTML, z.B. "price":"39.90" (auch in kaputtem/verschachteltem JavaScript)
-  function fromJsonRegex(html) {
+  function fromJsonRegex(html, u) {
     const re = /"(?:price|salePrice|sale_price|finalPrice|currentPrice|price_amount|priceAmount)"\s*:\s*"?(\d{1,6}(?:[.,]\d{1,2})?)"?/g;
+    const toks = urlTokens(u);
+    const urlColors = colorKeys(colorFromUrl(u.href) || '');
+    let best = null;
     for (const m of html.matchAll(re)) {
       const price = parsePrice(m[1]);
       if (!price) continue;
-      const around = html.slice(Math.max(0, m.index - 400), m.index + 400);
-      const cur = around.match(/"(?:priceCurrency|currency|currencyCode|currency_code)"\s*:\s*"([A-Z]{3})"/);
-      return strip({ price, currency: cur ? cur[1] : null });
+      // Umgebung prüfen: steht dort der Name/die Größe/Farbe aus dem Link?
+      // eigenes JSON-Objekt ({ … "price": … }) zählt doppelt, weitere Umgebung einfach
+      const objStart = html.lastIndexOf('{', m.index);
+      const objEnd = html.indexOf('}', m.index);
+      const obj = html.slice(Math.max(objStart, m.index - 800), objEnd < 0 ? m.index + 200 : Math.min(objEnd, m.index + 800));
+      const around = html.slice(Math.max(0, m.index - 150), m.index + 150);
+      const clean = (x) => x.replace(/["{}:,]/g, ' ');
+      const score =
+        2 * (matchScore(clean(obj), toks, urlColors) + sizeConflict(obj, toks)) +
+        matchScore(clean(around), toks, urlColors);
+      if (!best || score > best.score) {
+        const cur = around.match(/"(?:priceCurrency|currency|currencyCode|currency_code)"\s*:\s*"([A-Z]{3})"/);
+        best = { score, price, currency: cur ? cur[1] : null };
+      }
     }
-    return {};
+    return best && best.score > 0 ? strip({ price: best.price, currency: best.currency }) : {};
   }
 
   // Sichtbarer Text: erster Betrag mit Währungszeichen (bevorzugt nach der Überschrift)
@@ -831,13 +888,21 @@ window.WLUtil = WLUtil;
     if (!body) return {};
     body.querySelectorAll('script, style, noscript, header, nav, footer').forEach((n) => n.remove());
     removeOldPrices(body);
+    // Block-Elemente mit " | " trennen, damit Sätze nicht zusammenkleben
+    body.querySelectorAll('p, div, li, h1, h2, h3, h4, span, br, td').forEach((n) => n.append(' | '));
     const t = body.textContent.replace(/\s+/g, ' ');
     const num = '\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{2})?';
     const sym = '€|EUR|US\\$|USD|\\$|£|GBP|CHF';
     const re = new RegExp(`(?:(${sym})\\s?(${num}))|(?:(${num})\\s?(${sym}))`, 'g');
     const h1 = text(doc.querySelector('h1'));
     const start = h1 ? Math.max(0, t.indexOf(h1)) : 0;
-    const hits = [...t.matchAll(re)].map((m) => ({
+    const hits = [...t.matchAll(re)]
+      .filter((m) => {
+        // nur der eigene Satz vor dem Betrag zählt ("Versand ab 90 €")
+        const before = t.slice(Math.max(0, m.index - 45), m.index);
+        return !PROMO.test(before.split(/[|!?•]|\.\s/).pop());
+      })
+      .map((m) => ({
       at: m.index,
       price: parsePrice((m[2] || m[3] || '').replace(/\s/g, '')),
       currency: currencyOf(m[1] || m[4]),
@@ -1042,6 +1107,7 @@ window.WLUtil = WLUtil;
       price: eur, // immer in Euro
       originalPrice: p.price,
       currency: p.currency,
+      priceSource: p.priceSource,
       rateApprox: approx,
       shop: p.shop,
       checkedAt: new Date().toISOString(),
@@ -1143,6 +1209,11 @@ function render() {
     $('.card__title', el).textContent = item.title;
     const best = $('.card__best', el);
     best.textContent = eur(item.price);
+    if (item.priceSource) {
+      best.title = `preis aus: ${item.priceSource}`;
+      best.onclick = () =>
+        status(`${item.title}: preis aus ${item.priceSource}${item.currency && item.currency !== 'EUR' ? `, umgerechnet aus ${item.currency}` : ''}`);
+    }
     const shopEl = $('.card__shop', el);
     shopEl.textContent = item.shop || '';
     if (item.currency && item.currency !== 'EUR' && item.originalPrice != null) {
