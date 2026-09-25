@@ -1,6 +1,7 @@
 {
   // "name" muss genau so heißen wie dein Worker in Cloudflare
   "name": "wishly",
+  "account_id": "cb7b8bb7e12273984410b3e0439f8ea4",
   "main": "worker.js",
   "compatibility_date": "2025-09-01",
   // erreichbar unter wishly.<konto>.workers.dev und dnoadrian.at/wishly

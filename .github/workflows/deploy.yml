@@ -1,5 +1,5 @@
 # Veröffentlicht Wishly bei jedem Push auf main direkt in Cloudflare.
-# Braucht die Repo-Secrets CLOUDFLARE_API_TOKEN und CLOUDFLARE_ACCOUNT_ID.
+# Braucht das Repo-Secret CLOUDFLARE_API_TOKEN (Konto-ID steht in wrangler.jsonc).
 name: Cloudflare Deploy
 
 on:
@@ -25,5 +25,4 @@ jobs:
         if: env.HAS_TOKEN == 'true'
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy

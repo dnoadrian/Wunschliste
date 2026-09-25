@@ -42,10 +42,9 @@ Produktlink einfügen → Foto, Name und aktueller Preis des genauen Produkts (i
 ## Veröffentlichen (Cloudflare)
 
 Jeder Push auf `main` wird von GitHub Actions (`.github/workflows/deploy.yml`) mit `wrangler deploy` veröffentlicht.
-Dafür braucht das Repo zwei Secrets (Settings → Secrets and variables → Actions):
+Dafür braucht das Repo ein Secret (Settings → Secrets and variables → Actions):
 
 - `CLOUDFLARE_API_TOKEN` – in Cloudflare: Profil → API Tokens → Create Token → Vorlage „Edit Cloudflare Workers“
-- `CLOUDFLARE_ACCOUNT_ID` – die Konto-ID (steht in der Dashboard-Adresse `dash.cloudflare.com/<konto-id>/…`)
 
 Veröffentlichung von Hand: Actions → Cloudflare Deploy → Run workflow.
 Der Speicher für die Konten (Durable Object `Account`) und die Route `dnoadrian.at/wishly*` stehen in `wrangler.jsonc`.
