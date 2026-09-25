@@ -92,6 +92,24 @@ a:hover { text-shadow: var(--glow); }
   overflow: hidden;
 }
 
+/* Login */
+body.locked #app, body.locked .total { display: none; }
+.login { margin: 8px 24px 40px; }
+.login__box { max-width: 520px; border: 1px solid var(--line); background: #000; padding: 18px 18px 0; }
+.login__title { margin: 0 0 4px; font-size: 16px; font-weight: 800; }
+.login__hint { margin: 0 0 16px; font-size: 12px; }
+.login__row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.login__row span { width: 80px; color: var(--dim); }
+.login__row input {
+  flex: 1; min-width: 0; background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  outline: 0; padding: 6px 0; caret-color: #fff;
+}
+.login__row input:focus { border-bottom-color: var(--dim); }
+.login__actions { display: flex; gap: 18px; flex-wrap: wrap; margin: 16px 0; }
+.login .statusline { margin: 0 -18px; }
+.titlebar__logout { font-size: 12px; color: var(--dim); }
+.titlebar__logout:hover { color: #fff; }
+
 /* Listen */
 .lists {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
@@ -230,7 +248,7 @@ select {
 
 @media (max-width: 640px) {
   .window { margin: 0; border-left: 0; border-right: 0; }
-  .banner, .lists, .add, .toolbar, .grid, .empty { margin-left: 16px; margin-right: 16px; }
+  .banner, .lists, .add, .toolbar, .grid, .empty, .login { margin-left: 16px; margin-right: 16px; }
   .lists__edit { margin-left: 0; width: 100%; }
   .add__row { flex-wrap: wrap; }
   .add__row > span { display: none; }
@@ -245,13 +263,14 @@ select {
 
   </style>
 </head>
-<body>
+<body class="locked">
   <div class="crt" aria-hidden="true"></div>
 
   <main class="window">
     <header class="titlebar">
       <span class="dots"><i></i><i></i><i></i></span>
-      <span class="titlebar__path">user@wunschliste: ~</span>
+      <span class="titlebar__path"><span id="whoami">user</span>@wunschliste: ~</span>
+      <button type="button" class="titlebar__logout" id="logout" hidden>[ logout ]</button>
       <span class="titlebar__status" id="status">● bereit</span>
     </header>
 
@@ -263,6 +282,21 @@ select {
 ╚███╔███╔╝╚██████╔╝██║ ╚████║███████║╚██████╗██║  ██║███████╗██║███████║   ██║   ███████╗
  ╚══╝╚══╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝╚══════╝   ╚═╝   ╚══════╝</pre>
 
+    <section class="login" id="login" hidden>
+      <form class="login__box" id="login-form" autocomplete="on">
+        <p class="login__title">&gt; login</p>
+        <p class="dim login__hint">melde dich an, damit deine wunschlisten auf allen geräten gespeichert sind.</p>
+        <label class="login__row"><span>benutzer</span><input id="login-user" name="username" autocomplete="username" spellcheck="false" autocapitalize="off" required></label>
+        <label class="login__row"><span>passwort</span><input id="login-pass" name="password" type="password" autocomplete="current-password" required></label>
+        <div class="login__actions">
+          <button type="submit" id="login-btn">[ anmelden ]</button>
+          <button type="button" id="register-btn">[ neu registrieren ]</button>
+        </div>
+        <p class="statusline" id="login-status" role="status" aria-live="polite">benutzer und passwort eingeben</p>
+      </form>
+    </section>
+
+    <div id="app">
     <nav class="lists" aria-label="Listen">
       <span class="dim">&gt; listen:</span>
       <span class="lists__tabs" id="lists"></span>
@@ -292,6 +326,7 @@ select {
 
     <section class="grid" id="grid" aria-label="Produkte"></section>
     <p class="empty" id="empty" hidden>&gt; noch leer. füg oben einen produktlink ein.<span class="cursor">█</span></p>
+    </div>
   </main>
 
   <footer class="total">
@@ -431,14 +466,26 @@ window.WLUtil = WLUtil;
 
   /* ------------------------------------------------------------ Speicher */
 
-  // Mehrere Listen: "Main" nutzt den alten Speicherplatz, damit bestehende Produkte erhalten bleiben
-  const LISTS_KEY = 'wunschliste.lists';
-  const ACTIVE_KEY = 'wunschliste.active';
-  const DEFAULT_LISTS = [
-    { id: 'main', name: 'Main' },
-    { id: 'weihnachten', name: 'Weihnachten' },
-  ];
-  const itemsKey = (lid) => (lid === 'main' ? KEY : `${KEY}.${lid}`);
+  /*
+   * Die Listen liegen im Browser (localStorage) als schneller Zwischenspeicher.
+   * Mit Login werden sie zusätzlich im Worker gespeichert (pro Benutzer) und so auf allen Geräten abgeglichen.
+   * Ohne Worker (z.B. lokal geöffnet) gibt es kein Login, dann bleibt alles nur im Browser.
+   */
+  const DEFAULT_LISTS = [{ id: 'main', name: 'Main' }];
+  const SESSION_KEY = 'wunschliste.session';
+  const MIGRATED_KEY = 'wunschliste.migrated';
+
+  // Speicherplätze ohne Login (alter Stand: "Main" nutzt 'wunschliste.items')
+  const legacyKeys = () => ({
+    lists: 'wunschliste.lists',
+    active: 'wunschliste.active',
+    items: (lid) => (lid === 'main' ? KEY : `${KEY}.${lid}`),
+  });
+  // Speicherplätze pro Benutzer
+  const userKeys = (user) => {
+    const p = `wunschliste.u.${user.toLowerCase()}.`;
+    return { lists: `${p}lists`, active: `${p}active`, items: (lid) => `${p}items.${lid}` };
+  };
 
   function read(key, fallback) {
     try {
@@ -455,20 +502,140 @@ window.WLUtil = WLUtil;
     }
   }
 
-  let lists = read(LISTS_KEY, null);
-  if (!Array.isArray(lists) || !lists.length) {
-    lists = DEFAULT_LISTS.map((l) => ({ ...l }));
-    write(LISTS_KEY, lists);
+  let keys = legacyKeys();
+  let lists = [];
+  let activeId = 'main';
+
+  function openStore(k) {
+    keys = k;
+    lists = read(keys.lists, null);
+    if (!Array.isArray(lists) || !lists.length) {
+      lists = DEFAULT_LISTS.map((l) => ({ ...l }));
+      write(keys.lists, lists);
+    }
+    activeId = read(keys.active, lists[0].id);
+    if (!lists.some((l) => l.id === activeId)) activeId = lists[0].id;
   }
-  let activeId = read(ACTIVE_KEY, 'main');
-  if (!lists.some((l) => l.id === activeId)) activeId = lists[0].id;
+  openStore(legacyKeys());
 
   function load(lid = activeId) {
-    const items = read(itemsKey(lid), []);
+    const items = read(keys.items(lid), []);
     return Array.isArray(items) ? items : [];
   }
   function save(items, lid = activeId) {
-    write(itemsKey(lid), items);
+    write(keys.items(lid), items);
+    changed();
+  }
+
+  // gesamter Stand eines Speichers (für den Abgleich mit dem Worker)
+  function snapshot(k = keys) {
+    const ls = read(k.lists, null) || lists;
+    const items = {};
+    for (const l of ls) {
+      const it = read(k.items(l.id), []);
+      items[l.id] = Array.isArray(it) ? it : [];
+    }
+    return { lists: ls, active: read(k.active, activeId), items };
+  }
+  function applySnapshot(data, k = keys) {
+    if (!data || !Array.isArray(data.lists) || !data.lists.length) return;
+    write(k.lists, data.lists);
+    if (data.active) write(k.active, data.active);
+    for (const l of data.lists) write(k.items(l.id), (data.items && data.items[l.id]) || []);
+    if (k === keys) openStore(k);
+  }
+
+  /* ---- Konto / Abgleich ---- */
+
+  let session = read(SESSION_KEY, null);
+  let online = false; // läuft die Seite auf dem Worker (mit /api)?
+  let pushTimer = null;
+  let onSessionLost = () => {};
+
+  const authHeader = () => ({ Authorization: `Bearer ${encodeURIComponent(session.user)}:${session.token}` });
+
+  async function call(path, { method = 'GET', body, auth = false } = {}) {
+    const res = await fetch(`/api/${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(auth ? authHeader() : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && auth) {
+      session = null;
+      try {
+        localStorage.removeItem(SESSION_KEY);
+      } catch {}
+      onSessionLost();
+    }
+    if (!res.ok) throw new Error(data.error || `fehler ${res.status}`);
+    return data;
+  }
+
+  // Änderung merken und kurz danach zum Worker schicken
+  function changed() {
+    if (!online || !session) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(push, 700);
+  }
+  async function push() {
+    clearTimeout(pushTimer);
+    if (!online || !session) return;
+    try {
+      await call('data', { method: 'PUT', body: { data: snapshot() }, auth: true });
+    } catch {
+      /* nächster Versuch bei der nächsten Änderung */
+    }
+  }
+
+  async function detect() {
+    try {
+      const res = await fetch('/api/ping', { signal: AbortSignal.timeout(5000) });
+      online = res.ok && (await res.json()).ok === true;
+    } catch {
+      online = false;
+    }
+    if (online && session) openStore(userKeys(session.user));
+    return { online, user: session?.user || null };
+  }
+
+  // neueste Listen vom Worker holen (Worker ist die Wahrheit)
+  async function pull() {
+    if (!online || !session) return false;
+    const { data } = await call('data', { auth: true });
+    if (data) applySnapshot(data);
+    return true;
+  }
+
+  async function signIn(user, pass, register) {
+    const res = await call(register ? 'register' : 'login', { method: 'POST', body: { user, pass } });
+    session = { user: res.user, token: res.token };
+    write(SESSION_KEY, session);
+    openStore(userKeys(session.user));
+    let migrated = false;
+    if (res.empty) {
+      // neues/leeres Konto: bisherige Listen aus diesem Browser übernehmen (einmalig)
+      const legacy = snapshot(legacyKeys());
+      const hasLegacy = Object.values(legacy.items).some((it) => it.length) || legacy.lists.length > 1;
+      if (hasLegacy && !read(MIGRATED_KEY, null)) {
+        applySnapshot(legacy);
+        write(MIGRATED_KEY, session.user);
+        migrated = true;
+      }
+      await push();
+    } else await pull();
+    return { user: session.user, migrated };
+  }
+
+  async function signOut() {
+    try {
+      if (session) await call('logout', { method: 'POST', body: {}, auth: true });
+    } catch {}
+    session = null;
+    try {
+      localStorage.removeItem(SESSION_KEY);
+    } catch {}
+    openStore(legacyKeys());
   }
 
   /* ---- Listen verwalten ---- */
@@ -479,18 +646,20 @@ window.WLUtil = WLUtil;
   function switchTo(id) {
     if (!lists.some((l) => l.id === id)) throw new Error('liste nicht gefunden');
     activeId = id;
-    write(ACTIVE_KEY, id);
+    write(keys.active, id);
+    changed();
   }
 
   function createList(name) {
     name = String(name || '').trim().slice(0, 40);
     if (!name) throw new Error('name fehlt');
     if (lists.some((l) => l.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${name}" gibt es schon`);
-    const base = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'liste';
+    const base = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'liste';
     let id = base;
     for (let n = 2; lists.some((l) => l.id === id) || id === 'main'; n++) id = `${base}-${n}`;
     lists.push({ id, name });
-    write(LISTS_KEY, lists);
+    write(keys.lists, lists);
+    changed();
     return { id, name };
   }
 
@@ -501,18 +670,24 @@ window.WLUtil = WLUtil;
     if (!l) throw new Error('liste nicht gefunden');
     if (lists.some((x) => x.id !== id && x.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${name}" gibt es schon`);
     l.name = name;
-    write(LISTS_KEY, lists);
+    write(keys.lists, lists);
+    changed();
   }
 
   function deleteList(id) {
     if (lists.length <= 1) throw new Error('die letzte liste kann nicht gelöscht werden');
     lists = lists.filter((l) => l.id !== id);
-    write(LISTS_KEY, lists);
+    write(keys.lists, lists);
     try {
-      localStorage.removeItem(itemsKey(id));
+      localStorage.removeItem(keys.items(id));
     } catch {}
     if (activeId === id) switchTo(lists[0].id);
+    changed();
   }
+
+  // Preis stammt aus den Produktdaten des Shops (sicher) – alles andere ist geraten
+  const RELIABLE = ['shopify', 'amazon', 'woocommerce', 'json-ld', 'microdata', 'meta-tags'];
+  const isReliable = (source) => RELIABLE.includes(source);
 
   /* ------------------------------------------------------------ Abruf */
 
@@ -1323,13 +1498,13 @@ window.WLUtil = WLUtil;
       patch = await resolve(item.sourceUrl || item.url);
       // erkannten Shop-Preis immer merken (zum Vergleich, falls der Preis manuell gesetzt ist)
       patch.detectedPrice = patch.price ?? item.detectedPrice ?? null;
-      if (patch.price != null) {
-        patch.manualPrice = null; // Shop liefert (wieder) einen Preis -> der gilt
+      if (patch.price != null && isReliable(patch.priceSource)) {
+        patch.manualPrice = null; // Shop liefert sicher einen Preis -> der gilt
       } else if (item.manualPrice != null) {
-        // kein Preis gefunden: selbst eingetragener Preis gilt
+        // kein oder nur geratener Preis: selbst eingetragener Preis gilt
         patch.price = item.manualPrice;
         patch.error = null;
-      } else patch.price = item.price; // bekannten Preis behalten
+      } else if (patch.price == null) patch.price = item.price; // bekannten Preis behalten
       if (!patch.image) patch.image = item.image;
     } catch (e) {
       patch = { error: e.message, checkedAt: new Date().toISOString() };
@@ -1369,7 +1544,17 @@ window.WLUtil = WLUtil;
     refresh,
     remove,
     setPrice,
+    isReliable,
     inspect: resolve,
+    account: {
+      detect,
+      pull,
+      signIn,
+      signOut,
+      user: () => session?.user || null,
+      isOnline: () => online,
+      onSessionLost: (fn) => (onSessionLost = fn),
+    },
     lists: getLists,
     active: getActive,
     switchTo,
@@ -1506,6 +1691,9 @@ function render() {
       const orig = new Intl.NumberFormat('de-AT', { style: 'currency', currency: item.currency }).format(item.originalPrice);
       shopEl.textContent += ` · original ${orig}${item.rateApprox ? ' (kurs ca.)' : ''}`;
     }
+    if (item.manualPrice == null && item.price != null && !W.isReliable(item.priceSource)) {
+      shopEl.textContent += ' · preis unsicher';
+    }
     if (item.manualPrice != null) {
       shopEl.textContent += ' · preis selbst eingetragen';
     }
@@ -1514,11 +1702,12 @@ function render() {
     if (item.error) err.textContent = item.error;
     else err.remove();
 
-    // Bearbeiten nur, wenn der Shop keinen Preis liefert
+    // Bearbeiten nur, wenn der Preis nicht (sicher) herausgefunden wurde
     const setBtn = $('.card__set', el);
-    if (item.price == null || item.manualPrice != null) {
+    if (item.price == null || item.manualPrice != null || !W.isReliable(item.priceSource)) {
       setBtn.onclick = () => enterPrice(item);
       if (item.manualPrice != null) setBtn.textContent = '[ preis ändern ]';
+      else if (item.price != null) setBtn.textContent = '[ preis bearbeiten ]';
     } else setBtn.remove();
 
     $('.card__src', el).href = item.url;
@@ -1630,14 +1819,90 @@ $('#new-list').addEventListener('click', newList);
 $('#rename-list').addEventListener('click', renameList);
 $('#delete-list').addEventListener('click', deleteList);
 
-// Eingebettet in test.html (?embed): nichts laden, nichts aktualisieren
-if (!new URLSearchParams(location.search).has('embed')) {
+/* ------------------------------------------------------------ Login */
+
+const A = W.account;
+
+function loginStatus(text, state = '') {
+  const el = $('#login-status');
+  el.textContent = text;
+  el.dataset.state = state;
+}
+
+function showLogin(msg) {
+  document.body.classList.add('locked');
+  $('#login').hidden = false;
+  $('#logout').hidden = true;
+  $('#whoami').textContent = 'user';
+  loginStatus(msg || 'benutzer und passwort eingeben');
+  setTimeout(() => $('#login-user').focus(), 50);
+}
+
+// Liste der aktiven Sitzung anzeigen und Preise aktualisieren
+function startApp() {
+  document.body.classList.remove('locked');
+  $('#login').hidden = true;
+  const user = A.user();
+  $('#logout').hidden = !user;
+  $('#whoami').textContent = user ? user.toLowerCase() : 'user';
+  gen++;
+  busy.clear();
   items = W.all();
   renderLists();
   render();
   // Beim Öffnen der Seite: aktuellen Preis aller Produkte neu laden
   if (items.length) refreshAll();
   else status('bereit. füg oben einen produktlink ein.');
+}
+
+async function signIn(register) {
+  const user = $('#login-user').value.trim();
+  const pass = $('#login-pass').value;
+  if (!user || !pass) return loginStatus('benutzer und passwort eingeben', 'err');
+  $('#login-btn').disabled = $('#register-btn').disabled = true;
+  loginStatus(register ? 'registriere …' : 'melde an …', 'busy');
+  try {
+    const { migrated } = await A.signIn(user, pass, register);
+    $('#login-pass').value = '';
+    startApp();
+    if (migrated) status(`deine bisherigen listen wurden in das konto "${A.user()}" übernommen`, 'ok');
+  } catch (e) {
+    loginStatus(`fehler: ${e.message}`, 'err');
+  } finally {
+    $('#login-btn').disabled = $('#register-btn').disabled = false;
+  }
+}
+
+$('#login-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  signIn(false);
+});
+$('#register-btn').addEventListener('click', () => signIn(true));
+$('#logout').addEventListener('click', async () => {
+  if (!confirm('abmelden?')) return;
+  gen++;
+  await A.signOut();
+  showLogin('abgemeldet');
+});
+A.onSessionLost(() => {
+  gen++;
+  showLogin('sitzung abgelaufen – bitte neu anmelden');
+});
+
+// Eingebettet in test.html (?embed): nichts laden, nichts aktualisieren
+if (!new URLSearchParams(location.search).has('embed')) {
+  (async () => {
+    const { online, user } = await A.detect();
+    if (!online) return startApp(); // ohne Worker: alles bleibt im Browser, kein Login
+    if (!user) return showLogin();
+    try {
+      // neuesten Stand vom Worker holen (max. 5 s), sonst Zwischenspeicher nehmen
+      await Promise.race([A.pull(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 5000))]);
+    } catch {
+      /* offline oder langsam: Zwischenspeicher bleibt */
+    }
+    if (A.user()) startApp(); // Sitzung abgelaufen -> Login wird schon angezeigt
+  })();
 }
 
   </script>
